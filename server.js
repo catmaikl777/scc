@@ -97,8 +97,8 @@ const db = {
               column === "file_size" || column === "voice_duration"
                 ? "INTEGER"
                 : column === "file_data"
-                ? "BYTEA"
-                : "VARCHAR(255)";
+                  ? "BYTEA"
+                  : "VARCHAR(255)";
             await client.query(
               `ALTER TABLE messages ADD COLUMN ${column} ${type}`
             );
@@ -763,18 +763,32 @@ wss.on("connection", async (ws, req) => {
                 "video/mp4",
                 "video/webm",
                 "video/ogg",
+                // Добавьте эти аудио форматы:
+                "audio/webm",
+                "audio/webm;codecs=opus",
+                "audio/ogg",
+                "audio/ogg;codecs=opus",
+                "audio/mp4",
                 "audio/mpeg",
                 "audio/wav",
-                "audio/ogg",
-                "audio/webm",
-                "audio/mp4",
+                "audio/x-wav",
+                "audio/aac",
+                "audio/mp3",
                 "application/pdf",
                 "text/plain",
                 "application/msword",
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
               ];
 
-              if (!allowedTypes.includes(message.filetype)) {
+              // Более гибкая проверка для аудио форматов
+              const isAllowedType = allowedTypes.some(allowedType => {
+                if (allowedType.includes('audio') && message.filetype.includes('audio')) {
+                  return true;
+                }
+                return message.filetype === allowedType;
+              });
+
+              if (!isAllowedType) {
                 ws.send(
                   JSON.stringify({
                     type: "system",

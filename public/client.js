@@ -72,35 +72,91 @@
   let analyser = null;
   let visualizationBars = [];
   let visualizationInterval = null;
+  const iceRestartTimers = new Map();
+  const lastIceRestartAt = new Map();
+  const offerInProgress = new Set();
 
   // WebRTC конфигурация (улучшенная)
   const rtcConfig = {
     iceServers: [
+      // STUN серверы
       { urls: "stun:stun.l.google.com:19302" },
       { urls: "stun:stun1.l.google.com:19302" },
       { urls: "stun:stun2.l.google.com:19302" },
       { urls: "stun:stun3.l.google.com:19302" },
+      { urls: "stun:stun4.l.google.com:19302" },
+
+      // Бесплатные TURN серверы
       {
         urls: "turn:openrelay.metered.ca:80",
         username: "openrelayproject",
-        credential: "openrelayproject",
+        credential: "openrelayproject"
       },
       {
         urls: "turn:openrelay.metered.ca:443",
         username: "openrelayproject",
-        credential: "openrelayproject",
+        credential: "openrelayproject"
       },
+      {
+        urls: "turn:openrelay.metered.ca:80?transport=tcp",
+        username: "openrelayproject",
+        credential: "openrelayproject"
+      },
+      {
+        urls: "turn:openrelay.metered.ca:443?transport=tcp",
+        username: "openrelayproject",
+        credential: "openrelayproject"
+      },
+
+      // Дополнительные TURN серверы
       {
         urls: "turn:turn.bistri.com:80",
         username: "homeo",
-        credential: "homeo",
+        credential: "homeo"
       },
+      {
+        urls: "turn:turn.anyfirewall.com:443?transport=tcp",
+        username: "webrtc",
+        credential: "webrtc"
+      },
+
+      // Новые рабочие серверы
+      {
+        urls: "turn:relay1.expressturn.com:3478",
+        username: "efT5aVqjM7k2bX6",
+        credential: "efT5aVqjM7k2bX6"
+      },
+      {
+        urls: "turn:relay2.expressturn.com:3478",
+        username: "efT5aVqjM7k2bX6",
+        credential: "efT5aVqjM7k2bX6"
+      },
+
+      // Xirsys TURN (бесплатный тариф)
+      {
+        urls: [
+          "turn:turn.xirsys.com:80?transport=udp",
+          "turn:turn.xirsys.com:3478?transport=udp",
+          "turn:turn.xirsys.com:80?transport=tcp",
+          "turn:turn.xirsys.com:3478?transport=tcp",
+          "turns:turn.xirsys.com:443?transport=tcp",
+          "turns:turn.xirsys.com:5349?transport=tcp"
+        ],
+        username: "your-username",
+        credential: "your-token"
+      }
     ],
     iceCandidatePoolSize: 10,
     iceTransportPolicy: "all",
     bundlePolicy: "max-bundle",
     rtcpMuxPolicy: "require",
     iceServersProtocols: ["tcp", "udp"],
+  };
+
+  // Конфигурация с принудительным использованием TURN для строгих NAT
+  const rtcConfigRelay = {
+    ...rtcConfig,
+    iceTransportPolicy: "relay",
   };
 
   // Инициализация приложения
@@ -110,6 +166,24 @@
     initializeVoiceRecording();
     initializeNotifications();
     connectWebSocket();
+    addManualRefreshButton();
+  }
+
+  function debugConnectionsDetailed() {
+    console.log("🔍 DETAILED CONNECTION DEBUG:");
+    console.log(`Room Users: ${roomUsers.size}`);
+    roomUsers.forEach((user, sessionId) => {
+      const pc = peerConnections.get(sessionId);
+      console.log(`- ${user.userName} (${sessionId}) ${sessionId === mySessionId ? "(You)" : ""}`, {
+        peerConnection: pc ? {
+          connectionState: pc.connectionState,
+          iceConnectionState: pc.iceConnectionState,
+          signalingState: pc.signalingState,
+          hasLocalDescription: !!pc.localDescription,
+          hasRemoteDescription: !!pc.remoteDescription
+        } : "NO PEER CONNECTION"
+      });
+    });
   }
 
   // Настройка обработчиков событий
@@ -431,40 +505,40 @@
     voiceMessageBtn.classList.remove("recording");
   }
 
- function cancelVoiceRecording() {
-  if (!isRecording) return;
+  function cancelVoiceRecording() {
+    if (!isRecording) return;
 
-  mediaRecorder.stop();
-  isRecording = false;
+    mediaRecorder.stop();
+    isRecording = false;
 
-  // Останавливаем все потоки
-  mediaRecorder.stream.getTracks().forEach((track) => track.stop());
+    // Останавливаем все потоки
+    mediaRecorder.stream.getTracks().forEach((track) => track.stop());
 
-  // Очищаем интервалы
-  clearInterval(recordingTimer);
-  clearInterval(visualizationInterval);
+    // Очищаем интервалы
+    clearInterval(recordingTimer);
+    clearInterval(visualizationInterval);
 
-  // Сбрасываем визуализацию
-  visualizationBars.forEach((bar) => {
-    bar.style.height = "2px";
-    bar.style.background = "var(--primary-red)";
-  });
+    // Сбрасываем визуализацию
+    visualizationBars.forEach((bar) => {
+      bar.style.height = "2px";
+      bar.style.background = "var(--primary-red)";
+    });
 
-  // Закрываем AudioContext
-  if (audioContext) {
-    audioContext.close();
-    audioContext = null;
+    // Закрываем AudioContext
+    if (audioContext) {
+      audioContext.close();
+      audioContext = null;
+    }
+
+    // Сбрасываем данные
+    audioChunks = [];
+
+    // Скрываем модальное окно
+    voiceRecordModal.classList.add("hidden");
+    voiceMessageBtn.classList.remove("recording");
+
+    showSystemMessage("❌ Запись отменена");
   }
-
-  // Сбрасываем данные
-  audioChunks = [];
-
-  // Скрываем модальное окно
-  voiceRecordModal.classList.add("hidden");
-  voiceMessageBtn.classList.remove("recording");
-
-  showSystemMessage("❌ Запись отменена");
-}
 
   async function handleRecordingStop() {
     try {
@@ -497,8 +571,9 @@
 
         sendMessage({
           type: "file",
-          filename: `voice_message_${Date.now()}.webm`,
-          filetype: "audio/webm",
+
+          filename: `voice_message_${Date.now()}.ogg`,
+          filetype: "audio/ogg",
           size: audioBlob.size,
           data: base64,
           duration: duration,
@@ -522,13 +597,13 @@
 
     const time = data.ts
       ? new Date(data.ts).toLocaleTimeString("ru-RU", {
-          hour: "2-digit",
-          minute: "2-digit",
-        })
+        hour: "2-digit",
+        minute: "2-digit",
+      })
       : new Date().toLocaleTimeString("ru-RU", {
-          hour: "2-digit",
-          minute: "2-digit",
-        });
+        hour: "2-digit",
+        minute: "2-digit",
+      });
 
     el.innerHTML = `
       <div class="message-header">
@@ -537,15 +612,14 @@
       </div>
       <div class="voice-player">
         <div class="voice-controls">
-          <button class="play-pause-btn" data-audio="${
-            data.data
-          }" data-duration="${data.duration || 0}">▶️</button>
+          <button class="play-pause-btn" data-audio="${data.data
+      }" data-duration="${data.duration || 0}">▶️</button>
           <div class="voice-visualization" id="visualization_${data.ts}">
             <!-- Визуализация будет создана динамически -->
           </div>
           <div class="voice-duration">${formatDuration(
-            data.duration || 0
-          )}</div>
+        data.duration || 0
+      )}</div>
         </div>
         <div class="voice-progress">
           <div class="voice-progress-bar" style="width: 0%"></div>
@@ -748,8 +822,7 @@
       const delay = reconnectDelay * reconnectAttempts;
 
       showSystemMessage(
-        `🔄 Переподключение через ${
-          delay / 1000
+        `🔄 Переподключение через ${delay / 1000
         }сек... (${reconnectAttempts}/${maxReconnectAttempts})`
       );
 
@@ -820,7 +893,7 @@
       case "private_sent":
         showSystemMessage("✅ Личное сообщение отправлено");
         break;
-      
+
       // WebRTC сообщения
       case "call_invite":
         handleCallInvite(message);
@@ -897,14 +970,14 @@
       nameInput.value = autoName;
     }
 
-  // Отправляем имя на сервер
-  setTimeout(() => {
-    if (isConnected) {
-      sendMessage({ type: "setName", name: autoName });
-    }
-  }, 500);
+    // Отправляем имя на сервер
+    setTimeout(() => {
+      if (isConnected) {
+        sendMessage({ type: "setName", name: autoName });
+      }
+    }, 500);
 
-  
+
     console.log(`✅ Auto-generated name: ${autoName}`);
   }
 
@@ -979,13 +1052,13 @@
 
     const time = data.ts
       ? new Date(data.ts).toLocaleTimeString("ru-RU", {
-          hour: "2-digit",
-          minute: "2-digit",
-        })
+        hour: "2-digit",
+        minute: "2-digit",
+      })
       : new Date().toLocaleTimeString("ru-RU", {
-          hour: "2-digit",
-          minute: "2-digit",
-        });
+        hour: "2-digit",
+        minute: "2-digit",
+      });
 
     el.innerHTML = `
       <div class="message-header">
@@ -1036,13 +1109,13 @@
 
     const time = data.ts
       ? new Date(data.ts).toLocaleTimeString("ru-RU", {
-          hour: "2-digit",
-          minute: "2-digit",
-        })
+        hour: "2-digit",
+        minute: "2-digit",
+      })
       : new Date().toLocaleTimeString("ru-RU", {
-          hour: "2-digit",
-          minute: "2-digit",
-        });
+        hour: "2-digit",
+        minute: "2-digit",
+      });
 
     el.innerHTML = `
       <div class="message-header">
@@ -1054,9 +1127,8 @@
         <div class="file-info">
           <div class="file-name">${escapeHtml(data.filename)}</div>
           <div class="file-size">${formatFileSize(data.size)}</div>
-          <button class="download-btn" onclick="downloadFile('${
-            data.filename
-          }', '${data.filetype}', '${data.data}')">
+          <button class="download-btn" onclick="downloadFile('${data.filename
+      }', '${data.filetype}', '${data.data}')">
             Скачать
           </button>
         </div>
@@ -1381,14 +1453,14 @@
       <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
         <div>
           <div style="font-weight: 500;">Звонок от ${escapeHtml(
-            call.creatorName
-          )}</div>
+        call.creatorName
+      )}</div>
           <div style="font-size: 12px; color: var(--text-muted);">
             Участников: ${call.participantsCount} • 
             ${new Date(call.createdAt).toLocaleTimeString("ru-RU", {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
+        hour: "2-digit",
+        minute: "2-digit",
+      })}
           </div>
         </div>
         <button class="call-user-btn" style="background: #10b981;">➕</button>
@@ -1438,8 +1510,7 @@
 
   function handleGroupCallEnded(message) {
     showSystemMessage(
-      `📞 Групповой звонок завершен ${
-        message.endedBy ? `пользователем ${message.endedBy}` : ""
+      `📞 Групповой звонок завершен ${message.endedBy ? `пользователем ${message.endedBy}` : ""
       }`
     );
 
@@ -1454,9 +1525,9 @@
       <div class="message-header">
         <strong>🔒 ЛС от ${escapeHtml(data.name)}</strong>
         <span class="message-time">${new Date().toLocaleTimeString("ru-RU", {
-          hour: "2-digit",
-          minute: "2-digit",
-        })}</span>
+      hour: "2-digit",
+      minute: "2-digit",
+    })}</span>
       </div>
       <div class="message-text">${escapeHtml(data.text)}</div>
     `;
@@ -1590,9 +1661,8 @@
     }
 
     incomingCall = message;
-    callerNameEl.textContent = `${message.fromUserName} (${
-      message.isGroupCall ? "Групповой звонок" : "Индивидуальный звонок"
-    })`;
+    callerNameEl.textContent = `${message.fromUserName} (${message.isGroupCall ? "Групповой звонок" : "Индивидуальный звонок"
+      })`;
     incomingCallModal.classList.remove("hidden");
 
     setTimeout(() => {
@@ -1610,6 +1680,22 @@
 
     currentRoomId = message.roomId;
     isInCall = true;
+    isCallInitiator = true;
+
+    const initStreamAndUI = async () => {
+      try {
+        await initializeLocalStream();
+      } catch (e) {
+        console.error("Error initializing local stream for caller:", e);
+        showSystemMessage("⚠️ Нет доступа к камере/микрофону. Продолжаем без видео.");
+      }
+      showVideoCallUI();
+      setTimeout(() => {
+        updateRoomUsers();
+      }, 1000);
+    };
+    initStreamAndUI();
+
     showSystemMessage(`📞 Звонок начат с ${message.targetUserName}`);
   }
 
@@ -1698,73 +1784,14 @@
 
   function handleCallEnded(message) {
     showSystemMessage(
-      `📞 ${
-        message.endedBy
-          ? `Звонок завершен пользователем ${message.endedBy}`
-          : "Звонок завершен"
+      `📞 ${message.endedBy
+        ? `Звонок завершен пользователем ${message.endedBy}`
+        : "Звонок завершен"
       }`
     );
     endCall();
   }
 
-  // WebRTC соединения - ИСПРАВЛЕННЫЕ
-  async function createPeerConnection(targetSessionId) {
-    console.log(`🔗 Creating peer connection for: ${targetSessionId}`);
-
-    try {
-      const pc = new RTCPeerConnection(rtcConfig);
-
-      pc.pendingIceCandidates = [];
-
-      
-      pc.ontrack = (event) => {
-        console.log(
-          "📹 Received remote track from:",
-          targetSessionId,
-          event.streams
-        );
-        if (event.streams && event.streams[0]) {
-          showRemoteVideo(targetSessionId, event.streams[0]);
-        }
-      };
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate && currentRoomId) {
-          console.log(`🧊 Sending ICE candidate to ${targetSessionId}`);
-          sendMessage({
-            type: "webrtc_ice_candidate",
-            roomId: currentRoomId,
-            targetSessionId: targetSessionId,
-            candidate: event.candidate,
-          });
-        } else if (!event.candidate) {
-          console.log(`✅ All ICE candidates gathered for ${targetSessionId}`);
-        }
-      };
-
-      if (localStream) {
-        localStream.getTracks().forEach((track) => {
-          try {
-            pc.addTrack(track, localStream);
-            console.log(
-              `✅ Added local track to connection with ${targetSessionId}`
-            );
-          } catch (error) {
-            console.error("Error adding track:", error);
-          }
-        });
-      }
-
-      peerConnections.set(targetSessionId, pc);
-      return pc;
-    } catch (error) {
-      console.error(
-        `❌ Error creating peer connection for ${targetSessionId}:`,
-        error
-      );
-      throw error;
-    }
-  }
 
   function showRemoteVideo(sessionId, remoteStream) {
     const remoteVideoId = `remoteVideo_${sessionId}`;
@@ -1782,7 +1809,7 @@
       remoteVideo.autoplay = true;
       remoteVideo.playsInline = true;
       remoteVideo.className = "remote-video";
-      remoteVideo.muted = false;
+      remoteVideo.muted = true;
 
       // ИСПРАВЛЕНИЕ: Добавляем обработчики ошибок для видео
       remoteVideo.onerror = (e) => {
@@ -1824,35 +1851,29 @@
   }
 
   async function createOffer(targetSessionId, attempt = 1) {
-    console.log(
-      `📤 Creating offer for: ${targetSessionId} (attempt ${attempt})`
-    );
+    console.log(`📤 Creating offer for: ${targetSessionId} (attempt ${attempt})`);
 
-    if (peerConnections.has(targetSessionId)) {
-      const existingPc = peerConnections.get(targetSessionId);
-      if (existingPc.signalingState === "have-local-offer") {
-        console.log(`⏳ Already creating offer for ${targetSessionId}, waiting...`);
-        return;
-      }
-      
-      if (existingPc.signalingState === "stable" || existingPc.connectionState === "connected") {
-        console.log(`✅ Already connected to ${targetSessionId}`);
-        return;
-      }
+    if (offerInProgress.has(targetSessionId)) {
+      console.log(`⏳ Offer already in progress for ${targetSessionId}`);
+      return;
     }
-
-    if (peerConnections.has(targetSessionId)) {
-        const oldPc = peerConnections.get(targetSessionId);
-        if (oldPc.signalingState === "closed" || oldPc.connectionState === "failed") {
-          try { oldPc.close(); } catch (e) {}
-          peerConnections.delete(targetSessionId);
-        }
-      }
+    offerInProgress.add(targetSessionId);
 
     try {
-      const pc = await createPeerConnection(targetSessionId);
+      // ПРОСТАЯ ЛОГИКА: всегда пересоздаем соединение для надежности
+      const existingPc = peerConnections.get(targetSessionId);
+      if (existingPc) {
+        // Сохраняем только работающие соединения
+        if (existingPc.connectionState === "connected") {
+          console.log(`✅ Already connected to ${targetSessionId}`);
+          return;
+        }
+        // Закрываем проблемные соединения
+        existingPc.close();
+        peerConnections.delete(targetSessionId);
+      }
 
-      // Ждем стабилизации перед созданием offer
+      const pc = await createPeerConnection(targetSessionId);
       await new Promise(resolve => setTimeout(resolve, 300));
 
       const offer = await pc.createOffer({
@@ -1861,44 +1882,69 @@
       });
 
       await pc.setLocalDescription(offer);
-      console.log(
-        `✅ Local description set for ${targetSessionId}, state: ${pc.signalingState}`
-      );
+      console.log(`✅ Local description set for ${targetSessionId}, state: ${pc.signalingState}`);
 
       sendMessage({
         type: "webrtc_offer",
         roomId: currentRoomId,
-        targetSessionId: targetSessionId,
-        offer: offer,
+        targetSessionId,
+        offer,
       });
 
       console.log(`✅ Offer sent to ${targetSessionId}`);
     } catch (error) {
       console.error("❌ Error creating offer:", error);
 
+      // Очищаем проблемное соединение
       if (peerConnections.has(targetSessionId)) {
         peerConnections.get(targetSessionId).close();
         peerConnections.delete(targetSessionId);
       }
 
+      // Повторяем попытку
       if (attempt < 3) {
-        const delay = Math.min(2000 * Math.pow(2, attempt - 1), 5000);
-        console.log(
-          `🔄 Retrying offer creation for ${targetSessionId} in ${delay}ms...`
-        );
+        const delay = Math.min(2000 * attempt, 5000);
+        console.log(`🔄 Retrying offer creation for ${targetSessionId} in ${delay}ms...`);
         setTimeout(() => createOffer(targetSessionId, attempt + 1), delay);
-      } else {
-        console.error(
-          `❌ Failed to create offer for ${targetSessionId} after ${attempt} attempts`
-        );
       }
+    } finally {
+      offerInProgress.delete(targetSessionId);
     }
   }
 
+  // Автоматическое восстановление потерянных соединений
+  // setInterval(() => {
+  //   if (!isInCall || roomUsers.size <= 1) return;
+
+  //   const otherUsers = Array.from(roomUsers.values()).filter(
+  //     user => user.sessionId !== mySessionId
+  //   );
+
+  //   otherUsers.forEach(user => {
+  //     const pc = peerConnections.get(user.sessionId);
+
+  //     // Если пользователь в комнате, но нет активного соединения - восстанавливаем
+  //     if (!pc || pc.connectionState === "disconnected" || pc.connectionState === "failed") {
+  //       console.log(`🔄 Auto-reconnecting to ${user.userName} (state: ${pc?.connectionState})`);
+
+  //       if (pc) {
+  //         try { pc.close(); } catch (e) { }
+  //         peerConnections.delete(user.sessionId);
+  //       }
+
+  //       // Ждем случайную задержку чтобы избежать конфликтов
+  //       setTimeout(() => {
+  //         if (roomUsers.has(user.sessionId)) {
+  //           createOffer(user.sessionId);
+  //         }
+  //       }, Math.random() * 3000 + 1000);
+  //     }
+  //   });
+  // }, 10000); // Проверка каждые 10 секунд
+
   function handleUserJoined(message) {
     console.log(`👤 User ${message.userName} joined the call`);
-    
-    // Обновляем список пользователей в комнате
+
     if (!roomUsers.has(message.sessionId)) {
       roomUsers.set(message.sessionId, {
         userId: message.userId,
@@ -1907,18 +1953,27 @@
       });
 
       updateParticipantsCount(roomUsers.size);
-      
-      // Если это не мы и соединения нет, создаем его
-      if (isInCall && message.sessionId !== mySessionId && !peerConnections.has(message.sessionId)) {
-        console.log(`🔗 Creating connection with new user: ${message.userName}`);
-        
-        // Используем логику приоритета для избежания конфликтов
-        const shouldCreateOffer = mySessionId < message.sessionId;
-        
-        if (shouldCreateOffer) {
+
+      setTimeout(() => {
+        debugConnectionsDetailed();
+      }, 1000);
+
+      if (isInCall && message.sessionId !== mySessionId) {
+        const existingPc = peerConnections.get(message.sessionId);
+
+        // Пропускаем если уже есть активное соединение
+        if (existingPc &&
+          (existingPc.connectionState === "connected" ||
+            existingPc.signalingState === "have-local-offer")) {
+          console.log(`✅ Already processing connection with new user ${message.userName}`);
+          return;
+        }
+
+        if (!peerConnections.has(message.sessionId)) {
+          console.log(`🔄 Creating connection for new user: ${message.userName}`);
           setTimeout(() => {
             createOffer(message.sessionId);
-          }, 1000);
+          }, 2000);
         }
       }
     }
@@ -1933,7 +1988,6 @@
     });
 
     updateParticipantsCount(message.users.length);
-    setTimeout(updateVideoGridLayout, 100);
 
     const otherUsers = message.users.filter(
       (user) => user.sessionId !== mySessionId
@@ -1941,47 +1995,45 @@
 
     console.log(`🔗 Need to connect to ${otherUsers.length} other users`);
 
-    // Определяем, кто должен создавать offer
-    // Используем простую логику: пользователь с меньшим sessionId создает offer
-    const shouldCreateOffer = mySessionId < otherUsers[0]?.sessionId;
-
+    // УВЕЛИЧЬТЕ ЗАДЕРЖКУ МЕЖДУ СОЕДИНЕНИЯМИ
     for (let i = 0; i < otherUsers.length; i++) {
       const user = otherUsers[i];
 
-      if (!peerConnections.has(user.sessionId)) {
-        console.log(
-          `🔗 Setting up connection with: ${user.userName} (${user.sessionId})`
-        );
+      await new Promise((resolve) => setTimeout(resolve, 2000 + i * 2000)); // 2-6 секунд
 
-        // Добавляем задержку между созданием соединений
-        await new Promise((resolve) => setTimeout(resolve, 1000 + i * 500));
-
-        try {
-          if (shouldCreateOffer) {
-            await createOffer(user.sessionId);
-            console.log(`✅ Created offer for ${user.userName}`);
-          } else {
-            console.log(`⏳ Waiting for offer from ${user.userName}`);
-            // Будем ждать offer от другого пользователя
-          }
-        } catch (error) {
-          console.error(
-            `❌ Failed to setup connection with ${user.userName}:`,
-            error
-          );
-        }
+      console.log(`🔄 Setting up connection with: ${user.userName}`);
+      try {
+        await createOffer(user.sessionId);
+      } catch (error) {
+        console.error(`❌ Failed to create offer for ${user.userName}:`, error);
       }
     }
   }
 
-  async function createPeerConnection(targetSessionId) {
+  async function createPeerConnection(targetSessionId, configOverride) {
     console.log(`🔗 Creating peer connection for: ${targetSessionId}`);
 
     try {
-      const pc = new RTCPeerConnection(rtcConfig);
+      const pc = new RTCPeerConnection(configOverride || rtcConfig);
+      pc.createdAt = Date.now();
 
       // Инициализируем массив для отложенных ICE кандидатов
       pc.pendingIceCandidates = [];
+
+      // Гарантируем наличие приемников для аудио/видео
+      try {
+        const hasVideoSender = localStream && localStream.getVideoTracks().length > 0;
+        const hasAudioSender = localStream && localStream.getAudioTracks().length > 0;
+
+        if (!hasVideoSender) {
+          pc.addTransceiver("video", { direction: "recvonly" });
+        }
+        if (!hasAudioSender) {
+          pc.addTransceiver("audio", { direction: "recvonly" });
+        }
+      } catch (e) {
+        console.warn("⚠️ Unable to add transceivers:", e);
+      }
 
       // Обработчик получения удаленных потоков
       pc.ontrack = (event) => {
@@ -2024,8 +2076,12 @@
           if (pc.pendingIceCandidates) {
             pc.pendingIceCandidates = [];
           }
+        } else if (pc.connectionState === "disconnected") {
+          console.warn(`⚠️ Connection disconnected with ${targetSessionId}`);
+          scheduleIceRestart(targetSessionId, "connectionstate disconnected");
         } else if (pc.connectionState === "failed") {
           console.warn(`❌ Connection failed with ${targetSessionId}`);
+          restartConnectionWithRelay(targetSessionId);
         } else if (pc.connectionState === "closed") {
           console.log(`🔒 Connection closed with ${targetSessionId}`);
         }
@@ -2039,8 +2095,12 @@
 
         if (pc.iceConnectionState === "connected") {
           console.log(`✅ ICE connected to ${targetSessionId}`);
+        } else if (pc.iceConnectionState === "disconnected") {
+          console.warn(`⚠️ ICE disconnected with ${targetSessionId}`);
+          scheduleIceRestart(targetSessionId, "ice disconnected");
         } else if (pc.iceConnectionState === "failed") {
           console.warn(`❌ ICE failed with ${targetSessionId}`);
+          restartConnectionWithRelay(targetSessionId);
         }
       };
 
@@ -2096,8 +2156,7 @@
     console.log(`Room Users: ${roomUsers.size}`);
     roomUsers.forEach((user, sessionId) => {
       console.log(
-        `- ${user.userName} (${sessionId}) ${
-          sessionId === mySessionId ? "(You)" : ""
+        `- ${user.userName} (${sessionId}) ${sessionId === mySessionId ? "(You)" : ""
         }`
       );
     });
@@ -2131,11 +2190,57 @@
     }
   }
 
+  function scheduleIceRestart(sessionId, reason) {
+    if (!currentRoomId) return;
+    if (iceRestartTimers.get(sessionId)) return;
+    const now = Date.now();
+    const last = lastIceRestartAt.get(sessionId) || 0;
+    if (now - last < 8000) {
+      console.log(`🕓 ICE restart throttled for ${sessionId}`);
+      return;
+    }
+    const timer = setTimeout(() => {
+      iceRestartTimers.delete(sessionId);
+      restartIce(sessionId, reason);
+    }, 3000);
+    iceRestartTimers.set(sessionId, timer);
+  }
+
+  async function restartIce(sessionId, reason) {
+    try {
+      const pc = peerConnections.get(sessionId);
+      if (!pc || pc.signalingState === "closed") return;
+      if (pc.signalingState !== "stable") {
+        console.log(
+          `⏳ Skip ICE restart for ${sessionId}, signaling not stable: ${pc.signalingState}`
+        );
+        return;
+      }
+      lastIceRestartAt.set(sessionId, Date.now());
+      console.log(`🔁 Restarting ICE with ${sessionId} (${reason || "unknown"})`);
+      const offer = await pc.createOffer({
+        iceRestart: true,
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true,
+      });
+      await pc.setLocalDescription(offer);
+      sendMessage({
+        type: "webrtc_offer",
+        roomId: currentRoomId,
+        targetSessionId: sessionId,
+        offer,
+      });
+    } catch (e) {
+      console.warn("⚠️ ICE restart failed, falling back to full restart:", e);
+      restartConnection(sessionId);
+    }
+  }
+
   function restartConnection(sessionId) {
     try {
       const pc = peerConnections.get(sessionId);
       if (pc) {
-        try { pc.close(); } catch (e) {}
+        try { pc.close(); } catch (e) { }
         peerConnections.delete(sessionId);
       }
       if (currentRoomId) {
@@ -2143,6 +2248,63 @@
       }
     } catch (e) {
       console.warn("⚠️ Failed to restart connection:", e);
+    }
+  }
+
+  async function createOfferWithConfig(targetSessionId, config) {
+    console.log(`📤 Creating offer (config override) for: ${targetSessionId}`);
+
+    if (offerInProgress.has(targetSessionId)) {
+      console.log(`⏳ Offer already in progress for ${targetSessionId}`);
+      return;
+    }
+    offerInProgress.add(targetSessionId);
+
+    try {
+      const existingPc = peerConnections.get(targetSessionId);
+      if (existingPc) {
+        if (existingPc.signalingState === "have-local-offer") return;
+        if (
+          existingPc.signalingState === "stable" ||
+          existingPc.connectionState === "connected"
+        ) return;
+        try { existingPc.close(); } catch (_) { }
+        peerConnections.delete(targetSessionId);
+      }
+
+      const pc = await createPeerConnection(targetSessionId, config);
+      await new Promise((r) => setTimeout(r, 300));
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true,
+      });
+      await pc.setLocalDescription(offer);
+      sendMessage({
+        type: "webrtc_offer",
+        roomId: currentRoomId,
+        targetSessionId,
+        offer,
+      });
+    } catch (e) {
+      console.error("❌ Error creating offer with config:", e);
+    } finally {
+      offerInProgress.delete(targetSessionId);
+    }
+  }
+
+  function restartConnectionWithRelay(sessionId) {
+    try {
+      const pc = peerConnections.get(sessionId);
+      if (pc) {
+        try { pc.close(); } catch (e) { }
+        peerConnections.delete(sessionId);
+      }
+      if (currentRoomId) {
+        console.log(`🛰️ Fallback to TURN-only for ${sessionId}`);
+        createOfferWithConfig(sessionId, rtcConfigRelay);
+      }
+    } catch (e) {
+      console.warn("⚠️ Failed to restart (relay) connection:", e);
     }
   }
 
@@ -2157,9 +2319,6 @@
         pc.connectionState !== "connecting"
     );
 
-    console.log(
-      `👥 Participants count updated: ${displayCount} (actual: ${count})`
-    );
 
     // Обновляем только отключенные соединения с задержкой
     disconnectedConnections.forEach(async ([sessionId], index) => {
@@ -2194,83 +2353,39 @@
   //   }
   // }, 30000); // Увеличиваем до 30 секунд
 
-  async function handleRoomUsers(message) {
-    console.log("👥 Room users received:", message.users);
-
-    roomUsers.clear();
-    message.users.forEach((user) => {
-      roomUsers.set(user.sessionId, user);
-    });
-
-    updateParticipantsCount(message.users.length);
-
-    // Обновляем компоновку сетки
-    setTimeout(updateVideoGridLayout, 100);
-
-    // Создаем соединения с другими пользователями с задержкой
-    const otherUsers = message.users.filter(
-      (user) => user.sessionId !== mySessionId
-    );
-
-    console.log(`🔗 Need to connect to ${otherUsers.length} other users`);
-
-    // Создаем соединения последовательно с задержкой
-    for (let i = 0; i < otherUsers.length; i++) {
-      const user = otherUsers[i];
-
-      if (!peerConnections.has(user.sessionId)) {
-        console.log(
-          `🔗 Setting up connection with: ${user.userName} (${user.sessionId})`
-        );
-
-        // Добавляем задержку между созданием соединений
-        await new Promise((resolve) => setTimeout(resolve, 1000 + i * 500));
-
-        try {
-          await createOffer(user.sessionId);
-          console.log(`✅ Connection setup initiated for ${user.userName}`);
-        } catch (error) {
-          console.error(
-            `❌ Failed to setup connection with ${user.userName}:`,
-            error
-          );
-        }
-      }
-    }
-  }
 
   async function handleWebRTCOffer(message) {
     try {
       console.log(`📥 Received WebRTC offer from: ${message.fromSessionId}`);
 
-      if (peerConnections.has(message.fromSessionId)) {
-        const existingPc = peerConnections.get(message.fromSessionId);
-        if (existingPc.signalingState === "have-local-offer") {
-          console.log(
-            `🔄 Offer conflict detected with ${message.fromSessionId}, closing our offer`
-          );
-          existingPc.close();
-          peerConnections.delete(message.fromSessionId);
-        }
+      // УДАЛИТЕ ВСЮ ЛОГИКУ КОНФЛИКТА - ПРОСТО ПРИНИМАЕМ ОФФЕР
+      let pc = peerConnections.get(message.fromSessionId);
+
+      // Если PeerConnection уже существует и работает - используем его
+      if (pc && (pc.connectionState === "connected" || pc.signalingState === "stable")) {
+        console.log(`✅ Already connected to ${message.fromSessionId}, reusing connection`);
+      }
+      // Если PeerConnection в плохом состоянии - пересоздаем
+      else if (pc && (pc.signalingState === "closed" || pc.connectionState === "failed")) {
+        console.log(`🔄 Replacing failed connection with ${message.fromSessionId}`);
+        pc.close();
+        peerConnections.delete(message.fromSessionId);
+        pc = null;
       }
 
-      if (peerConnections.has(message.fromSessionId)) {
-        const existingPc = peerConnections.get(message.fromSessionId);
-        if (existingPc.connectionState === "connected") {
-          console.log(
-            `✅ Already connected to ${message.fromSessionId}, ignoring duplicate offer`
-          );
-          return;
-        }
+      // Создаем новое соединение если нужно
+      if (!pc) {
+        pc = await createPeerConnection(message.fromSessionId);
       }
 
-      const pc = await createPeerConnection(message.fromSessionId);
-
+      // Устанавливаем удаленное описание
       await pc.setRemoteDescription(new RTCSessionDescription(message.offer));
       console.log(`✅ Remote description set, state: ${pc.signalingState}`);
 
+      // Обрабатываем отложенные ICE кандидаты
       await processPendingIceCandidates(pc, message.fromSessionId);
 
+      // Создаем и отправляем ответ
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
@@ -2285,9 +2400,20 @@
     } catch (error) {
       console.error("❌ Error handling WebRTC offer:", error);
 
+      // При ошибке пересоздаем соединение
       if (message.fromSessionId && peerConnections.has(message.fromSessionId)) {
-        peerConnections.get(message.fromSessionId).close();
-        peerConnections.delete(message.fromSessionId);
+        const pc = peerConnections.get(message.fromSessionId);
+        if (pc.signalingState === "have-local-offer" || pc.connectionState === "failed") {
+          pc.close();
+          peerConnections.delete(message.fromSessionId);
+
+          // Пытаемся создать новое предложение через 2 секунды
+          setTimeout(() => {
+            if (currentRoomId && roomUsers.has(message.fromSessionId)) {
+              createOffer(message.fromSessionId);
+            }
+          }, 2000);
+        }
       }
     }
   }
@@ -2296,6 +2422,7 @@
     try {
       console.log(`📥 Received WebRTC answer from: ${message.fromSessionId}`);
 
+      debugConnectionsDetailed();
       const pc = peerConnections.get(message.fromSessionId);
       if (!pc) {
         console.warn(
@@ -2315,7 +2442,7 @@
 
       if (pc.signalingState !== "have-local-offer") {
         console.warn(`⚠️ Wrong signaling state for answer: ${pc.signalingState}, expected have-local-offer`);
-        
+
         // Если соединение в плохом состоянии, пересоздаем его
         if (pc.signalingState === "closed" || pc.connectionState === "failed") {
           console.log(`🔄 Recreating connection with ${message.fromSessionId}`);
@@ -2333,7 +2460,7 @@
       await processPendingIceCandidates(pc, message.fromSessionId);
     } catch (error) {
       console.error("❌ Error handling WebRTC answer:", error);
-      
+
       // Более детальная обработка ошибок
       if (error.toString().includes("wrong state: stable")) {
         console.log(
@@ -2399,18 +2526,40 @@
 
   function handleUserLeft(message) {
     console.log(`👤 User ${message.userName} left the call`);
-    
+
     roomUsers.delete(message.sessionId);
 
+    // НЕ УДАЛЯТЬ PeerConnection СРАЗУ - дать время для восстановления
     if (peerConnections.has(message.sessionId)) {
-      peerConnections.get(message.sessionId).close();
-      peerConnections.delete(message.sessionId);
+      const pc = peerConnections.get(message.sessionId);
+
+      // Удаляем только если соединение окончательно разорвано
+      if (pc.connectionState === "closed" || pc.connectionState === "failed") {
+        pc.close();
+        peerConnections.delete(message.sessionId);
+        console.log(`🗑️ Removed peer connection for ${message.userName}`);
+      } else {
+        console.log(`⏳ Keeping peer connection for ${message.userName} (state: ${pc.connectionState})`);
+        // Установим таймер для окончательного удаления через 30 секунд
+        setTimeout(() => {
+          if (peerConnections.has(message.sessionId)) {
+            peerConnections.get(message.sessionId).close();
+            peerConnections.delete(message.sessionId);
+            console.log(`🗑️ Final removal of peer connection for ${message.userName}`);
+          }
+        }, 30000);
+      }
     }
 
     removeVideoElement(message.sessionId);
     updateParticipantsCount(roomUsers.size);
-    
+
     showSystemMessage(`👤 ${message.userName} покинул звонок`);
+
+    // ДОБАВИТЬ: автоматическое обновление комнаты
+    setTimeout(() => {
+      updateRoomUsers();
+    }, 2000);
   }
 
   function removeVideoElement(sessionId) {
@@ -2451,8 +2600,7 @@
     console.log(`Total in room: ${roomUsers.size}`);
     roomUsers.forEach((user, sessionId) => {
       console.log(
-        `- ${user.userName} (${sessionId}) ${
-          sessionId === mySessionId ? "(You)" : ""
+        `- ${user.userName} (${sessionId}) ${sessionId === mySessionId ? "(You)" : ""
         }`
       );
     });
@@ -2482,6 +2630,11 @@
       } else {
         participantsCountEl.style.color = "";
         participantsCountEl.style.fontWeight = "";
+      }
+
+      if (count > 1) {
+        console.log(`👥 Participants count updated: ${count}`);
+        debugConnectionsDetailed();
       }
     }
 
@@ -2614,26 +2767,87 @@
 
   // Автоматический мониторинг соединений
   setInterval(() => {
-    if (!isInCall) return;
+    if (!isInCall || roomUsers.size <= 1) return;
 
-    peerConnections.forEach((pc, sessionId) => {
-      const connectionTime = Date.now() - (pc.createdAt || Date.now());
+    let disconnectedCount = 0;
+    const otherUsers = Array.from(roomUsers.values()).filter(
+      user => user.sessionId !== mySessionId
+    );
 
-      if (
-        (pc.connectionState === "disconnected" ||
-          pc.iceConnectionState === "disconnected") &&
-        connectionTime > 10000
-      ) {
-        console.log(`🔄 Auto-restarting stuck connection with ${sessionId}`);
-        restartConnection(sessionId);
-      }
+    otherUsers.forEach(user => {
+      const pc = peerConnections.get(user.sessionId);
 
-      if (pc.connectionState === "connecting" && connectionTime > 15000) {
-        console.log(`🔄 Restarting stalled connection with ${sessionId}`);
-        restartConnection(sessionId);
+      if (!pc ||
+        pc.connectionState !== "connected" ||
+        pc.iceConnectionState !== "connected") {
+        disconnectedCount++;
+        console.log(`⚠️ Connection issue with ${user.userName}:`, {
+          connectionState: pc?.connectionState,
+          iceState: pc?.iceConnectionState,
+          signalingState: pc?.signalingState
+        });
       }
     });
-  }, 5000);
+
+    // Если больше половины соединений имеют проблемы
+    if (disconnectedCount > 0 && disconnectedCount >= Math.ceil(otherUsers.length / 2)) {
+      console.log(`🔄 Auto-refreshing ${disconnectedCount} problematic connections`);
+      refreshAllConnections();
+    }
+  }, 15000); // Проверка каждые 15 секунд
+
+
+  function refreshAllConnections() {
+    if (!isInCall) return;
+
+    console.log("🔄 Manually refreshing all connections...");
+
+    const otherUsers = Array.from(roomUsers.values()).filter(
+      user => user.sessionId !== mySessionId
+    );
+
+    otherUsers.forEach((user, index) => {
+      setTimeout(() => {
+        const existingPc = peerConnections.get(user.sessionId);
+
+        // Пересоздаем соединение только если оно не активно
+        if (!existingPc ||
+          existingPc.connectionState !== "connected" ||
+          existingPc.iceConnectionState !== "connected") {
+
+          console.log(`🔄 Refreshing connection with ${user.userName}`);
+          if (existingPc) {
+            try { existingPc.close(); } catch (e) { }
+            peerConnections.delete(user.sessionId);
+          }
+          createOffer(user.sessionId);
+        }
+      }, index * 3000); // 3 секунды между каждым
+    });
+  }
+
+  // Добавьте кнопку для ручного обновления в UI
+  function addManualRefreshButton() {
+    if (!document.getElementById('manualRefreshBtn')) {
+      const refreshBtn = document.createElement('button');
+      refreshBtn.id = 'manualRefreshBtn';
+      refreshBtn.textContent = '🔄 Обновить соединения';
+      refreshBtn.style.position = 'fixed';
+      refreshBtn.style.bottom = '10px';
+      refreshBtn.style.right = '10px';
+      refreshBtn.style.zIndex = '1000';
+      refreshBtn.style.background = '#f59e0b';
+      refreshBtn.style.color = 'white';
+      refreshBtn.style.border = 'none';
+      refreshBtn.style.padding = '8px 12px';
+      refreshBtn.style.borderRadius = '4px';
+      refreshBtn.style.cursor = 'pointer';
+
+      refreshBtn.addEventListener('click', refreshAllConnections);
+      document.body.appendChild(refreshBtn);
+    }
+  }
+
 
   // Инициализация при загрузке
   window.addEventListener("DOMContentLoaded", () => {
