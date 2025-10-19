@@ -4,6 +4,8 @@ const fs = require("fs");
 const path = require("path");
 const WebSocket = require("ws");
 const { Pool } = require("pg");
+const admin = require("firebase-admin");
+const webpush = require("web-push");
 
 // Настройка подключения к PostgreSQL
 const pool = new Pool({
@@ -21,6 +23,35 @@ pool.on("error", (err, client) => {
   console.error("Unexpected error on idle client", err);
 });
 
+const serviceAccount = {
+  type: "service_account",
+  project_id: process.env.FIREBASE_PROJECT_ID,
+  private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
+  private_key: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+  client_email: process.env.FIREBASE_CLIENT_EMAIL,
+  client_id: process.env.FIREBASE_CLIENT_ID,
+  auth_uri: "https://accounts.google.com/o/oauth2/auth",
+  token_uri: "https://oauth2.googleapis.com/token",
+  auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
+  client_x509_cert_url: process.env.FIREBASE_CLIENT_CERT_URL,
+};
+
+try {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+  });
+  console.log("✅ Firebase Admin initialized");
+} catch (error) {
+  console.warn("⚠️ Firebase Admin initialization failed:", error.message);
+}
+
+// Настройка VAPID для web-push (fallback)
+webpush.setVapidDetails(
+  "mailto:your-email@example.com",
+  process.env.VAPID_PUBLIC_KEY,
+  process.env.VAPID_PRIVATE_KEY
+);
+
 // Функции для работы с базой данных
 const db = {
   async init() {
@@ -32,6 +63,16 @@ const db = {
           username VARCHAR(50) UNIQUE NOT NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS user_fcm_tokens (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+          fcm_token VARCHAR(500) UNIQUE NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
 
@@ -86,7 +127,13 @@ const db = {
 
   async ensureFileColumns(client) {
     try {
-      const columns = ["file_name", "file_type", "file_size", "file_data", "voice_duration"];
+      const columns = [
+        "file_name",
+        "file_type",
+        "file_size",
+        "file_data",
+        "voice_duration",
+      ];
       for (const column of columns) {
         try {
           await client.query(`SELECT ${column} FROM messages LIMIT 1`);
@@ -97,8 +144,8 @@ const db = {
               column === "file_size" || column === "voice_duration"
                 ? "INTEGER"
                 : column === "file_data"
-                  ? "BYTEA"
-                  : "VARCHAR(255)";
+                ? "BYTEA"
+                : "VARCHAR(255)";
             await client.query(
               `ALTER TABLE messages ADD COLUMN ${column} ${type}`
             );
@@ -271,7 +318,16 @@ const db = {
       const result = await client.query(
         `INSERT INTO messages (user_id, message_type, content, file_name, file_type, file_size, file_data, target_user_id, voice_duration) 
          VALUES ($1, 'file', $2, $3, $4, $5, $6, $7, $8) RETURNING id, created_at`,
-        [userId, filename, filename, filetype, size, buffer, targetUserId, voiceDuration]
+        [
+          userId,
+          filename,
+          filename,
+          filetype,
+          size,
+          buffer,
+          targetUserId,
+          voiceDuration,
+        ]
       );
       return result.rows[0];
     } catch (error) {
@@ -398,6 +454,108 @@ const db = {
     }
   },
 };
+
+const fcmDb = {
+  async saveFCMToken(userId, token) {
+    const client = await pool.connect();
+    try {
+      await client.query(
+        `
+        INSERT INTO user_fcm_tokens (user_id, fcm_token) 
+        VALUES ($1, $2)
+        ON CONFLICT (fcm_token) 
+        DO UPDATE SET user_id = $1, updated_at = CURRENT_TIMESTAMP
+      `,
+        [userId, token]
+      );
+      console.log(`✅ FCM token saved for user ${userId}`);
+    } catch (error) {
+      console.error("Error saving FCM token:", error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
+  async getFCMTokens(userIds) {
+    const client = await pool.connect();
+    try {
+      const result = await client.query(
+        `
+        SELECT DISTINCT fcm_token 
+        FROM user_fcm_tokens 
+        WHERE user_id = ANY($1)
+      `,
+        [userIds]
+      );
+      return result.rows.map((row) => row.fcm_token);
+    } catch (error) {
+      console.error("Error getting FCM tokens:", error);
+      return [];
+    } finally {
+      client.release();
+    }
+  },
+
+  async deleteFCMToken(token) {
+    const client = await pool.connect();
+    try {
+      await client.query("DELETE FROM user_fcm_tokens WHERE fcm_token = $1", [
+        token,
+      ]);
+    } catch (error) {
+      console.error("Error deleting FCM token:", error);
+    } finally {
+      client.release();
+    }
+  },
+};
+
+// Функция отправки push-уведомления
+async function sendPushNotification(tokens, notificationData) {
+  if (!tokens || tokens.length === 0) return;
+
+  const message = {
+    notification: {
+      title: notificationData.title,
+      body: notificationData.body,
+    },
+    data: notificationData.data || {},
+    android: {
+      priority: "high",
+    },
+    apns: {
+      payload: {
+        aps: {
+          sound: "default",
+          badge: 1,
+        },
+      },
+    },
+    tokens: tokens,
+  };
+
+  try {
+    const response = await admin.messaging().sendEachForMulticast(message);
+    console.log(
+      `✅ Push notification sent successfully: ${response.successCount} successful`
+    );
+
+    // Удаляем невалидные токены
+    if (response.failureCount > 0) {
+      response.responses.forEach((resp, idx) => {
+        if (!resp.success) {
+          console.log(
+            `❌ Failed to send to token: ${tokens[idx]}, error: ${resp.error}`
+          );
+          fcmDb.deleteFCMToken(tokens[idx]);
+        }
+      });
+    }
+  } catch (error) {
+    console.error("❌ Error sending push notification:", error);
+  }
+}
 
 // HTTP сервер
 const server = http.createServer((req, res) => {
@@ -717,6 +875,50 @@ wss.on("connection", async (ws, req) => {
           }
           break;
 
+        case "fcm_token":
+          if (message.token && userId) {
+            await fcmDb.saveFCMToken(userId, message.token);
+            console.log(`✅ FCM token received from ${currentUser.username}`);
+          }
+          break;
+
+        // Добавьте обработчик send_notification
+        case "send_notification":
+          if (message.title && message.body) {
+            // Определяем кому отправлять уведомление
+            let targetUserIds = [];
+
+            if (message.userId && message.userId !== userId) {
+              // Не отправляем уведомление себе
+              targetUserIds = [message.userId];
+            } else if (message.roomId) {
+              // Отправляем всем в комнате кроме себя
+              const room = rooms.get(message.roomId);
+              if (room) {
+                targetUserIds = Array.from(room.users.values())
+                  .filter((user) => user.userId !== userId)
+                  .map((user) => user.userId);
+              }
+            } else {
+              // Отправляем всем кроме себя (для системных уведомлений)
+              targetUserIds = Array.from(clients.values())
+                .filter((client) => client.userId !== userId)
+                .map((client) => client.userId);
+            }
+
+            if (targetUserIds.length > 0) {
+              const tokens = await fcmDb.getFCMTokens(targetUserIds);
+              if (tokens.length > 0) {
+                await sendPushNotification(tokens, {
+                  title: message.title,
+                  body: message.body,
+                  data: message.data || {},
+                });
+              }
+            }
+          }
+          break;
+
         case "message":
           if (message.text && message.text.trim()) {
             const text = message.text.trim();
@@ -781,8 +983,11 @@ wss.on("connection", async (ws, req) => {
               ];
 
               // Более гибкая проверка для аудио форматов
-              const isAllowedType = allowedTypes.some(allowedType => {
-                if (allowedType.includes('audio') && message.filetype.includes('audio')) {
+              const isAllowedType = allowedTypes.some((allowedType) => {
+                if (
+                  allowedType.includes("audio") &&
+                  message.filetype.includes("audio")
+                ) {
                   return true;
                 }
                 return message.filetype === allowedType;

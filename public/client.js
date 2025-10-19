@@ -48,6 +48,9 @@
   let notificationPermission = false;
   let serviceWorkerRegistration = null;
 
+  let messaging = null;
+  let fcmToken = null;
+
   let reconnectAttempts = 0;
   const maxReconnectAttempts = 5;
   const reconnectDelay = 3000;
@@ -90,46 +93,46 @@
       {
         urls: "turn:openrelay.metered.ca:80",
         username: "openrelayproject",
-        credential: "openrelayproject"
+        credential: "openrelayproject",
       },
       {
         urls: "turn:openrelay.metered.ca:443",
         username: "openrelayproject",
-        credential: "openrelayproject"
+        credential: "openrelayproject",
       },
       {
         urls: "turn:openrelay.metered.ca:80?transport=tcp",
         username: "openrelayproject",
-        credential: "openrelayproject"
+        credential: "openrelayproject",
       },
       {
         urls: "turn:openrelay.metered.ca:443?transport=tcp",
         username: "openrelayproject",
-        credential: "openrelayproject"
+        credential: "openrelayproject",
       },
 
       // Дополнительные TURN серверы
       {
         urls: "turn:turn.bistri.com:80",
         username: "homeo",
-        credential: "homeo"
+        credential: "homeo",
       },
       {
         urls: "turn:turn.anyfirewall.com:443?transport=tcp",
         username: "webrtc",
-        credential: "webrtc"
+        credential: "webrtc",
       },
 
       // Новые рабочие серверы
       {
         urls: "turn:relay1.expressturn.com:3478",
         username: "efT5aVqjM7k2bX6",
-        credential: "efT5aVqjM7k2bX6"
+        credential: "efT5aVqjM7k2bX6",
       },
       {
         urls: "turn:relay2.expressturn.com:3478",
         username: "efT5aVqjM7k2bX6",
-        credential: "efT5aVqjM7k2bX6"
+        credential: "efT5aVqjM7k2bX6",
       },
 
       // Xirsys TURN (бесплатный тариф)
@@ -140,11 +143,11 @@
           "turn:turn.xirsys.com:80?transport=tcp",
           "turn:turn.xirsys.com:3478?transport=tcp",
           "turns:turn.xirsys.com:443?transport=tcp",
-          "turns:turn.xirsys.com:5349?transport=tcp"
+          "turns:turn.xirsys.com:5349?transport=tcp",
         ],
         username: "your-username",
-        credential: "your-token"
-      }
+        credential: "your-token",
+      },
     ],
     iceCandidatePoolSize: 10,
     iceTransportPolicy: "all",
@@ -160,13 +163,152 @@
   };
 
   // Инициализация приложения
-  function init() {
+  async function init() {
     setupEventListeners();
     initializeEmojiPanel();
     initializeVoiceRecording();
     initializeNotifications();
+    loadUserName();
+    await initializeFirebase();
     connectWebSocket();
-    addManualRefreshButton();
+    preloadMicrophoneAccess();
+  }
+
+  async function initializeFirebase() {
+    try {
+      // Проверяем поддержку Firebase
+      if (typeof firebase === "undefined") {
+        console.warn("⚠️ Firebase not loaded");
+        return;
+      }
+
+      // Firebase конфигурация - ЗАМЕНИТЕ на вашу из Firebase Console
+      const firebaseConfig = {
+        apiKey: "AIzaSyAJkEmBpFS2KEkQEmRX8Whg3mmHq8-P01k",
+        authDomain: "firecatchat-6eb3a.firebaseapp.com",
+        projectId: "firecatchat-6eb3a",
+        storageBucket: "firecatchat-6eb3a.firebasestorage.app",
+        messagingSenderId: "451383593989",
+        appId: "1:451383593989:web:3a26800f883bd0c7dce06c",
+        measurementId: "G-W20Q520LX5"
+      };
+
+      // Инициализируем Firebase
+      firebase.initializeApp(firebaseConfig);
+      messaging = firebase.messaging();
+
+      // Запрашиваем разрешение на уведомления
+      const permission = await Notification.requestPermission();
+      if (permission === "granted") {
+        console.log("✅ Notification permission granted");
+
+        // Получаем FCM токен
+        await getFCMToken();
+
+        // Настраиваем обработчик сообщений
+        setupFirebaseMessageHandlers();
+      } else {
+        console.log("❌ Notification permission denied");
+      }
+    } catch (error) {
+      console.error("❌ Firebase initialization error:", error);
+    }
+  }
+
+  // Функция получения FCM токена
+  async function getFCMToken() {
+    try {
+      // Регистрируем Service Worker для FCM
+      const registration = await navigator.serviceWorker.register(
+        "/firebase-messaging-sw.js"
+      );
+      console.log("✅ FCM Service Worker registered");
+
+      // Устанавливаем VAPID ключ - ЗАМЕНИТЕ на ваш из Firebase Console
+      await messaging.useServiceWorker(registration);
+      await messaging.usePublicVapidKey("YOUR_VAPID_PUBLIC_KEY");
+
+      // Получаем токен
+      fcmToken = await messaging.getToken();
+      console.log("✅ FCM Token:", fcmToken);
+
+      // Отправляем токен на сервер
+      if (fcmToken && isConnected) {
+        sendMessage({
+          type: "fcm_token",
+          token: fcmToken,
+          userId: myId,
+        });
+      }
+
+      // Обработка обновления токена
+      messaging.onTokenRefresh(async () => {
+        fcmToken = await messaging.getToken();
+        console.log("🔄 FCM Token refreshed:", fcmToken);
+
+        if (fcmToken && isConnected) {
+          sendMessage({
+            type: "fcm_token",
+            token: fcmToken,
+            userId: myId,
+          });
+        }
+      });
+    } catch (error) {
+      console.error("❌ Error getting FCM token:", error);
+    }
+  }
+
+  // Настройка обработчиков сообщений FCM
+  function setupFirebaseMessageHandlers() {
+    // Обработка сообщений когда приложение активно
+    messaging.onMessage((payload) => {
+      console.log("📨 Received foreground message:", payload);
+
+      // Показываем уведомление даже когда приложение активно
+      showLocalNotification(payload);
+    });
+
+    // Обработка сообщений от Service Worker
+    navigator.serviceWorker.addEventListener("message", (event) => {
+      if (event.data && event.data.type === "NOTIFICATION_CLICK") {
+        handleNotificationClick(event.data.data);
+      }
+    });
+  }
+
+  // Функция показа локального уведомления
+  function showLocalNotification(payload) {
+    const title = payload.data?.title || "Огненный Кот";
+    const options = {
+      body: payload.data?.body || "Новое сообщение",
+      icon: "/favicon.ico",
+      badge: "/favicon.ico",
+      data: payload.data,
+      actions: [
+        {
+          action: "open",
+          title: "📖 Открыть чат",
+        },
+        {
+          action: "close",
+          title: "❌ Закрыть",
+        },
+      ],
+      tag: payload.data?.tag || "default",
+      requireInteraction: true,
+    };
+
+    // Используем стандартные уведомления
+    if ("Notification" in window && Notification.permission === "granted") {
+      const notification = new Notification(title, options);
+
+      notification.onclick = (event) => {
+        event.preventDefault();
+        handleNotificationClick({ notification: options.data });
+        notification.close();
+      };
+    }
   }
 
   function debugConnectionsDetailed() {
@@ -174,15 +316,22 @@
     console.log(`Room Users: ${roomUsers.size}`);
     roomUsers.forEach((user, sessionId) => {
       const pc = peerConnections.get(sessionId);
-      console.log(`- ${user.userName} (${sessionId}) ${sessionId === mySessionId ? "(You)" : ""}`, {
-        peerConnection: pc ? {
-          connectionState: pc.connectionState,
-          iceConnectionState: pc.iceConnectionState,
-          signalingState: pc.signalingState,
-          hasLocalDescription: !!pc.localDescription,
-          hasRemoteDescription: !!pc.remoteDescription
-        } : "NO PEER CONNECTION"
-      });
+      console.log(
+        `- ${user.userName} (${sessionId}) ${
+          sessionId === mySessionId ? "(You)" : ""
+        }`,
+        {
+          peerConnection: pc
+            ? {
+                connectionState: pc.connectionState,
+                iceConnectionState: pc.iceConnectionState,
+                signalingState: pc.signalingState,
+                hasLocalDescription: !!pc.localDescription,
+                hasRemoteDescription: !!pc.remoteDescription,
+              }
+            : "NO PEER CONNECTION",
+        }
+      );
     });
   }
 
@@ -217,7 +366,20 @@
     fileInput.addEventListener("change", handleFileUpload);
 
     // Голосовые сообщения
-    voiceMessageBtn.addEventListener("click", startVoiceRecording);
+    voiceMessageBtn.addEventListener("click", async () => {
+      try {
+        // Сначала проверяем доступ
+        const stream = await requestMicrophone();
+        if (stream) {
+          // Если доступ есть, начинаем запись
+          startVoiceRecording();
+        } else {
+          showSystemMessage("❌ Не удалось получить доступ к микрофону");
+        }
+      } catch (error) {
+        showSystemMessage("❌ Ошибка доступа к микрофону");
+      }
+    });
 
     // Звонки
     startCallBtn.addEventListener("click", startGroupCall);
@@ -325,8 +487,25 @@
   }
 
   function handleNotificationClick(data) {
-    // Фокусируем окно при клике на уведомление
+    console.log("🔔 Handling notification click:", data);
+
+    // Фокусируем окно
     window.focus();
+
+    // Обрабатываем действия
+    if (data.action === "accept-call") {
+      if (incomingCall) {
+        acceptCall();
+      }
+    } else if (data.action === "reject-call") {
+      if (incomingCall) {
+        rejectCall();
+      }
+    } else if (data.action === "join-call") {
+      if (activeCalls.length > 0) {
+        joinGroupCall(activeCalls[0].roomId);
+      }
+    }
 
     // Прокручиваем к последним сообщениям
     scrollToBottom();
@@ -371,26 +550,76 @@
     } else {
       // Страница активна - очищаем уведомления
       if (serviceWorkerRegistration) {
-        serviceWorkerRegistration.getNotifications().then(notifications => {
-          notifications.forEach(notification => notification.close());
+        serviceWorkerRegistration.getNotifications().then((notifications) => {
+          notifications.forEach((notification) => notification.close());
         });
       }
     }
   }
 
+  async function subscribeToPush(registration) {
+    try {
+      const subscription = await registration.pushManager.getSubscription();
+
+      if (!subscription) {
+        // Создаем новую подписку
+        const vapidPublicKey = "YOUR_VAPID_PUBLIC_KEY"; // Нужно сгенерировать VAPID ключи
+        const newSubscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+        });
+
+        console.log("✅ Push subscription created:", newSubscription);
+        // Здесь нужно отправить subscription на ваш сервер
+      } else {
+        console.log("✅ Push subscription exists:", subscription);
+      }
+    } catch (error) {
+      console.warn("⚠️ Push subscription failed:", error);
+    }
+  }
+
+  function urlBase64ToUint8Array(base64String) {
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding)
+      .replace(/\-/g, "+")
+      .replace(/_/g, "/");
+
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+
+    for (let i = 0; i < rawData.length; ++i) {
+      outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+  }
+
   // Функции для голосовых сообщений
   async function startVoiceRecording() {
     try {
-      // Запрашиваем доступ к микрофону
+      console.log("🎤 Starting voice recording...");
+
+      // Запрашиваем доступ к микрофону с базовыми настройками
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
-          sampleRate: 44100,
+          sampleRate: 16000, // Уменьшаем для совместимости
           channelCount: 1,
         },
       });
+
+      // Проверяем наличие аудио треков
+      const audioTracks = stream.getAudioTracks();
+      if (audioTracks.length === 0) {
+        throw new Error("No audio tracks available");
+      }
+
+      console.log(
+        "✅ Microphone access granted, audio tracks:",
+        audioTracks.length
+      );
 
       // Инициализируем AudioContext для визуализации
       audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -402,9 +631,32 @@
       const bufferLength = analyser.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
 
+      // Пробуем разные MIME types для совместимости
+      const mimeTypes = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/ogg;codecs=opus",
+        "audio/mp4",
+        "audio/wav",
+      ];
+
+      let supportedType = "";
+      for (const type of mimeTypes) {
+        if (MediaRecorder.isTypeSupported(type)) {
+          supportedType = type;
+          break;
+        }
+      }
+
+      if (!supportedType) {
+        supportedType = "audio/webm"; // Fallback
+      }
+
+      console.log("🎵 Using audio format:", supportedType);
+
       // Настраиваем MediaRecorder
       mediaRecorder = new MediaRecorder(stream, {
-        mimeType: "audio/webm;codecs=opus",
+        mimeType: supportedType,
       });
 
       audioChunks = [];
@@ -412,12 +664,19 @@
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           audioChunks.push(event.data);
+          console.log("📦 Audio chunk received:", event.data.size, "bytes");
         }
       };
 
       mediaRecorder.onstop = handleRecordingStop;
 
-      // Запускаем запись
+      mediaRecorder.onerror = (event) => {
+        console.error("❌ MediaRecorder error:", event.error);
+        showSystemMessage("❌ Ошибка записи");
+        cancelVoiceRecording();
+      };
+
+      // Запускаем запись с небольшими chunk'ами для надежности
       mediaRecorder.start(100);
       isRecording = true;
       recordingStartTime = Date.now();
@@ -431,9 +690,21 @@
 
       // Запускаем визуализацию
       startVisualization(dataArray, bufferLength);
+
+      console.log("✅ Voice recording started successfully");
     } catch (error) {
-      console.error("Error starting voice recording:", error);
-      showSystemMessage("❌ Не удалось получить доступ к микрофону");
+      console.error("❌ Error starting voice recording:", error);
+
+      let errorMessage = "❌ Не удалось получить доступ к микрофону";
+      if (error.name === "NotAllowedError") {
+        errorMessage = "❌ Разрешение на использование микрофона отклонено";
+      } else if (error.name === "NotFoundError") {
+        errorMessage = "❌ Микрофон не найден";
+      } else if (error.name === "NotSupportedError") {
+        errorMessage = "❌ Браузер не поддерживает запись аудио";
+      }
+
+      showSystemMessage(errorMessage);
     }
   }
 
@@ -473,6 +744,20 @@
         stopVoiceRecording();
       }
     }, 1000);
+  }
+
+  // Запрос доступа к микрофону
+  async function requestMicrophone() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: false,
+      });
+      console.log("Микрофон доступен");
+      return stream;
+    } catch (error) {
+      console.error("Ошибка доступа к микрофону:", error);
+    }
   }
 
   function stopVoiceRecording() {
@@ -543,17 +828,15 @@
   async function handleRecordingStop() {
     try {
       if (audioChunks.length === 0) {
-        showSystemMessage("❌ Запись слишком короткая");
+        showSystemMessage("❌ Запись слишком короткая или отсутствует");
         return;
       }
 
-      const audioBlob = new Blob(audioChunks, {
-        type: "audio/webm;codecs=opus",
-      });
+      const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
       const duration = Math.floor((Date.now() - recordingStartTime) / 1000);
 
       if (duration < 1) {
-        showSystemMessage("❌ Запись слишком короткая");
+        showSystemMessage("❌ Запись слишком короткая (минимум 1 секунда)");
         return;
       }
 
@@ -569,11 +852,17 @@
       reader.onload = () => {
         const base64 = reader.result.split(",")[1];
 
+        // Определяем расширение файла в зависимости от формата
+        const fileExtension = mediaRecorder.mimeType.includes("ogg")
+          ? "ogg"
+          : mediaRecorder.mimeType.includes("mp4")
+          ? "mp4"
+          : "webm";
+
         sendMessage({
           type: "file",
-
-          filename: `voice_message_${Date.now()}.ogg`,
-          filetype: "audio/ogg",
+          filename: `voice_${Date.now()}.${fileExtension}`,
+          filetype: mediaRecorder.mimeType,
           size: audioBlob.size,
           data: base64,
           duration: duration,
@@ -582,9 +871,14 @@
         showSystemMessage("✅ Голосовое сообщение отправлено");
       };
 
+      reader.onerror = () => {
+        console.error("❌ Error reading audio blob");
+        showSystemMessage("❌ Ошибка обработки записи");
+      };
+
       reader.readAsDataURL(audioBlob);
     } catch (error) {
-      console.error("Error processing recording:", error);
+      console.error("❌ Error processing recording:", error);
       showSystemMessage("❌ Ошибка обработки записи");
     } finally {
       audioChunks = [];
@@ -597,13 +891,13 @@
 
     const time = data.ts
       ? new Date(data.ts).toLocaleTimeString("ru-RU", {
-        hour: "2-digit",
-        minute: "2-digit",
-      })
+          hour: "2-digit",
+          minute: "2-digit",
+        })
       : new Date().toLocaleTimeString("ru-RU", {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
+          hour: "2-digit",
+          minute: "2-digit",
+        });
 
     el.innerHTML = `
       <div class="message-header">
@@ -612,14 +906,15 @@
       </div>
       <div class="voice-player">
         <div class="voice-controls">
-          <button class="play-pause-btn" data-audio="${data.data
-      }" data-duration="${data.duration || 0}">▶️</button>
+          <button class="play-pause-btn" data-audio="${
+            data.data
+          }" data-duration="${data.duration || 0}">▶️</button>
           <div class="voice-visualization" id="visualization_${data.ts}">
             <!-- Визуализация будет создана динамически -->
           </div>
           <div class="voice-duration">${formatDuration(
-        data.duration || 0
-      )}</div>
+            data.duration || 0
+          )}</div>
         </div>
         <div class="voice-progress">
           <div class="voice-progress-bar" style="width: 0%"></div>
@@ -656,9 +951,24 @@
     const audioData = button.getAttribute("data-audio");
     const duration = parseInt(button.getAttribute("data-duration"));
 
-    if (!audioData) return;
+    if (!audioData) {
+      console.error("❌ No audio data found");
+      return;
+    }
 
-    const audio = new Audio(`data:audio/webm;base64,${audioData}`);
+    // Определяем MIME type на основе данных
+    const mimeType = audioData.startsWith("Gk")
+      ? "audio/ogg"
+      : audioData.startsWith("Ukl")
+      ? "audio/wav"
+      : "audio/webm";
+
+    const audio = new Audio(`data:${mimeType};base64,${audioData}`);
+
+    // Настройка аудио для мобильных устройств
+    audio.preload = "auto";
+    audio.volume = 1.0;
+
     const visualization = button.parentElement.querySelector(
       ".voice-visualization"
     );
@@ -669,13 +979,21 @@
 
     // Останавливаем все другие воспроизведения
     document.querySelectorAll(".play-pause-btn").forEach((btn) => {
-      if (btn !== button) {
-        btn.textContent = "▶️";
+      if (btn !== button && btn.getAttribute("data-audio-instance")) {
         const otherAudio = btn.getAttribute("data-audio-instance");
-        if (otherAudio) {
+        try {
           otherAudio.pause();
-          btn.removeAttribute("data-audio-instance");
-        }
+          otherAudio.currentTime = 0;
+        } catch (e) {}
+        btn.textContent = "▶️";
+        btn.removeAttribute("data-audio-instance");
+
+        // Сбрасываем визуализацию для других кнопок
+        const otherBars = btn.parentElement.querySelectorAll(".voice-bar");
+        const otherProgress = btn.parentElement.parentElement.querySelector(
+          ".voice-progress-bar"
+        );
+        resetVisualization(otherBars, otherProgress);
       }
     });
 
@@ -690,21 +1008,51 @@
       button.textContent = "⏸️";
       button.setAttribute("data-audio-instance", audio);
 
-      audio.addEventListener("loadedmetadata", () => {
-        startPlaybackVisualization(audio, bars, progressBar, duration);
+      audio.addEventListener("loadeddata", () => {
+        console.log("✅ Audio loaded, duration:", audio.duration);
+        startPlaybackVisualization(
+          audio,
+          bars,
+          progressBar,
+          duration || audio.duration
+        );
+      });
+
+      audio.addEventListener("timeupdate", () => {
+        const progress = (audio.currentTime / audio.duration) * 100;
+        if (progressBar) {
+          progressBar.style.width = `${progress}%`;
+        }
       });
 
       audio.addEventListener("ended", () => {
         button.textContent = "▶️";
         button.removeAttribute("data-audio-instance");
         resetVisualization(bars, progressBar);
+        if (progressBar) {
+          progressBar.style.width = "0%";
+        }
       });
 
-      audio.play().catch((error) => {
-        console.error("Error playing audio:", error);
+      audio.addEventListener("error", (e) => {
+        console.error("❌ Audio playback error:", e);
         button.textContent = "▶️";
         button.removeAttribute("data-audio-instance");
+        resetVisualization(bars, progressBar);
+        showSystemMessage("❌ Ошибка воспроизведения аудио");
       });
+
+      // Для мобильных устройств - запускаем в контексте пользовательского действия
+      const playPromise = audio.play();
+
+      if (playPromise !== undefined) {
+        playPromise.catch((error) => {
+          console.error("❌ Audio play failed:", error);
+          button.textContent = "▶️";
+          button.removeAttribute("data-audio-instance");
+          showSystemMessage("❌ Не удалось воспроизвести аудио");
+        });
+      }
     }
   }
 
@@ -752,7 +1100,7 @@
 
   function getWebSocketUrl() {
     // Для продакшена - ваш backend сервер
-    if (window.location.hostname.includes('vercel.app')) {
+    if (window.location.hostname.includes("vercel.app")) {
       return "wss://aqqqqqq-2.onrender.com"; // Замените на ваш сервер
     }
     return "ws://localhost:3000";
@@ -822,7 +1170,8 @@
       const delay = reconnectDelay * reconnectAttempts;
 
       showSystemMessage(
-        `🔄 Переподключение через ${delay / 1000
+        `🔄 Переподключение через ${
+          delay / 1000
         }сек... (${reconnectAttempts}/${maxReconnectAttempts})`
       );
 
@@ -859,7 +1208,10 @@
         break;
       case "system":
         showSystemMessage(message.text);
-        if (message.text && (message.text.includes("вошёл") || message.text.includes("вышел"))) {
+        if (
+          message.text &&
+          (message.text.includes("вошёл") || message.text.includes("вышел"))
+        ) {
           notifySystemEvent("👤 Изменение участников", message.text);
         }
         break;
@@ -958,9 +1310,9 @@
     myId = message.id;
     mySessionId = message.sessionId;
 
-    // Автоматически генерируем имя пользователя
-    const randomNumber = Math.floor(Math.random() * 10000);
-    const autoName = `User${randomNumber}`;
+    // ПРОВЕРЯЕМ localStorage ПЕРЕД генерацией имени
+    const savedName = localStorage.getItem("chatUserName");
+    const autoName = savedName || `User${Math.floor(Math.random() * 10000)}`;
 
     // Сохраняем в localStorage
     localStorage.setItem("chatUserName", autoName);
@@ -977,8 +1329,19 @@
       }
     }, 500);
 
+    console.log(
+      `✅ Name set: ${autoName} (${
+        savedName ? "from storage" : "auto-generated"
+      })`
+    );
+  }
 
-    console.log(`✅ Auto-generated name: ${autoName}`);
+  // ДОБАВИТЬ при загрузке страницы
+  function loadUserName() {
+    const savedName = localStorage.getItem("chatUserName");
+    if (savedName && nameInput) {
+      nameInput.value = savedName;
+    }
   }
 
   function handleHistoryMessage(message) {
@@ -1052,13 +1415,13 @@
 
     const time = data.ts
       ? new Date(data.ts).toLocaleTimeString("ru-RU", {
-        hour: "2-digit",
-        minute: "2-digit",
-      })
+          hour: "2-digit",
+          minute: "2-digit",
+        })
       : new Date().toLocaleTimeString("ru-RU", {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
+          hour: "2-digit",
+          minute: "2-digit",
+        });
 
     el.innerHTML = `
       <div class="message-header">
@@ -1109,13 +1472,13 @@
 
     const time = data.ts
       ? new Date(data.ts).toLocaleTimeString("ru-RU", {
-        hour: "2-digit",
-        minute: "2-digit",
-      })
+          hour: "2-digit",
+          minute: "2-digit",
+        })
       : new Date().toLocaleTimeString("ru-RU", {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
+          hour: "2-digit",
+          minute: "2-digit",
+        });
 
     el.innerHTML = `
       <div class="message-header">
@@ -1127,8 +1490,9 @@
         <div class="file-info">
           <div class="file-name">${escapeHtml(data.filename)}</div>
           <div class="file-size">${formatFileSize(data.size)}</div>
-          <button class="download-btn" onclick="downloadFile('${data.filename
-      }', '${data.filetype}', '${data.data}')">
+          <button class="download-btn" onclick="downloadFile('${
+            data.filename
+          }', '${data.filetype}', '${data.data}')">
             Скачать
           </button>
         </div>
@@ -1164,19 +1528,24 @@
 
         if (notificationPermission) {
           console.log("✅ Уведомления разрешены");
+
+          // Регистрируем сервис-воркер для PUSH уведомлений
+          if ("serviceWorker" in navigator) {
+            try {
+              const registration = await navigator.serviceWorker.register(
+                "/sw.js"
+              );
+              serviceWorkerRegistration = registration;
+              console.log("✅ Service Worker зарегистрирован");
+
+              // Подписываемся на push уведомления
+              await subscribeToPush(registration);
+            } catch (error) {
+              console.warn("⚠️ Service Worker не зарегистрирован:", error);
+            }
+          }
         } else {
           console.log("❌ Уведомления не разрешены");
-        }
-      }
-
-      // Регистрируем сервис-воркер
-      if ("serviceWorker" in navigator) {
-        try {
-          const registration = await navigator.serviceWorker.register("/sw.js");
-          serviceWorkerRegistration = registration;
-          console.log("✅ Service Worker зарегистрирован");
-        } catch (error) {
-          console.warn("⚠️ Service Worker не зарегистрирован:", error);
         }
       }
     } catch (error) {
@@ -1210,43 +1579,44 @@
 
   // Функция для отправки уведомления о новом сообщении
   function notifyNewMessage(message) {
-    showNotification(`Новое сообщение от ${message.name}`, {
-      body: message.text || "📎 Вложение",
-      tag: "new-message",
-      requireInteraction: true,
-      actions: [
-        {
-          action: "open",
-          title: "📖 Открыть чат",
+    // Отправляем на сервер для push-уведомления
+    if (isConnected) {
+      sendMessage({
+        type: "send_notification",
+        title: `💬 Новое сообщение от ${message.name}`,
+        body: message.text || "📎 Вложение",
+        tag: "new-message",
+        userId: message.id, // ID отправителя (чтобы не слать себе)
+        data: {
+          type: "new_message",
+          messageId: message.ts || Date.now(),
+          fromUserId: message.id,
+          fromUserName: message.name,
         },
-        {
-          action: "close",
-          title: "❌ Закрыть",
-        },
-      ],
-    });
+      });
+    }
   }
 
   // Функция для уведомления о входящем звонке
   function notifyIncomingCall(callInfo) {
-    showNotification(`Входящий звонок от ${callInfo.fromUserName}`, {
-      body: callInfo.isGroupCall
-        ? "👥 Групповой звонок"
-        : "📞 Индивидуальный звонок",
-      tag: "incoming-call",
-      requireInteraction: true,
-      vibrate: [500, 200, 500, 200, 500],
-      actions: [
-        {
-          action: "accept-call",
-          title: "📞 Принять",
+    if (isConnected) {
+      sendMessage({
+        type: "send_notification",
+        title: `📞 Входящий звонок от ${callInfo.fromUserName}`,
+        body: callInfo.isGroupCall
+          ? "👥 Групповой звонок"
+          : "📞 Индивидуальный звонок",
+        tag: "incoming-call",
+        userId: callInfo.fromUserId, // Не слать самому себе
+        data: {
+          type: "incoming_call",
+          roomId: callInfo.roomId,
+          isGroupCall: callInfo.isGroupCall,
+          fromUserId: callInfo.fromUserId,
+          fromUserName: callInfo.fromUserName,
         },
-        {
-          action: "reject-call",
-          title: "❌ Отклонить",
-        },
-      ],
-    });
+      });
+    }
   }
 
   // Функция для уведомления о системных событиях
@@ -1453,14 +1823,14 @@
       <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
         <div>
           <div style="font-weight: 500;">Звонок от ${escapeHtml(
-        call.creatorName
-      )}</div>
+            call.creatorName
+          )}</div>
           <div style="font-size: 12px; color: var(--text-muted);">
             Участников: ${call.participantsCount} • 
             ${new Date(call.createdAt).toLocaleTimeString("ru-RU", {
-        hour: "2-digit",
-        minute: "2-digit",
-      })}
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
           </div>
         </div>
         <button class="call-user-btn" style="background: #10b981;">➕</button>
@@ -1510,7 +1880,8 @@
 
   function handleGroupCallEnded(message) {
     showSystemMessage(
-      `📞 Групповой звонок завершен ${message.endedBy ? `пользователем ${message.endedBy}` : ""
+      `📞 Групповой звонок завершен ${
+        message.endedBy ? `пользователем ${message.endedBy}` : ""
       }`
     );
 
@@ -1525,9 +1896,9 @@
       <div class="message-header">
         <strong>🔒 ЛС от ${escapeHtml(data.name)}</strong>
         <span class="message-time">${new Date().toLocaleTimeString("ru-RU", {
-      hour: "2-digit",
-      minute: "2-digit",
-    })}</span>
+          hour: "2-digit",
+          minute: "2-digit",
+        })}</span>
       </div>
       <div class="message-text">${escapeHtml(data.text)}</div>
     `;
@@ -1612,6 +1983,9 @@
         localStream.getTracks().forEach((track) => track.stop());
       }
 
+      console.log("🎯 Requesting media stream with both audio and video...");
+
+      // Запрашиваем медиа с более конкретными настройками для аудио
       localStream = await navigator.mediaDevices.getUserMedia({
         video: {
           width: { ideal: 640 },
@@ -1622,33 +1996,107 @@
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
+          channelCount: 1,
+          sampleRate: 48000,
+          sampleSize: 16,
+          // Явно запрашиваем определенные устройства если нужно
+          // deviceId: preferredAudioDeviceId
         },
       });
 
-      if (localVideo) {
-        localVideo.srcObject = localStream;
-        console.log("✅ Local video stream initialized");
+      // Детальная проверка полученных треков
+      const audioTracks = localStream.getAudioTracks();
+      const videoTracks = localStream.getVideoTracks();
+
+      console.log("✅ Media stream obtained:", {
+        audioTracks: audioTracks.length,
+        videoTracks: videoTracks.length,
+        audioTrackDetails: audioTracks.map((track) => ({
+          enabled: track.enabled,
+          readyState: track.readyState,
+          muted: track.muted,
+          kind: track.kind,
+          label: track.label,
+          settings: track.getSettings(),
+        })),
+      });
+
+      // ВАЖНО: Гарантируем что аудио треки включены
+      audioTracks.forEach((track) => {
+        if (!track.enabled) {
+          console.log("🔊 Enabling audio track that was disabled");
+          track.enabled = true;
+        }
+      });
+
+      if (audioTracks.length === 0) {
+        console.warn(
+          "⚠️ No audio tracks obtained, trying audio-only fallback..."
+        );
+
+        try {
+          const audioOnlyStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+              channelCount: 1,
+              sampleRate: 48000,
+            },
+          });
+
+          const audioOnlyTracks = audioOnlyStream.getAudioTracks();
+          console.log(
+            `✅ Audio-only fallback obtained ${audioOnlyTracks.length} audio tracks`
+          );
+
+          // Добавляем аудио треки к существующему потоку или заменяем его
+          if (videoTracks.length > 0) {
+            // Если есть видео, добавляем аудио к нему
+            audioOnlyTracks.forEach((track) => {
+              localStream.addTrack(track);
+            });
+          } else {
+            // Если нет видео, используем только аудио
+            localStream = audioOnlyStream;
+          }
+        } catch (audioError) {
+          console.error("❌ Audio-only fallback also failed:", audioError);
+          throw new Error("Cannot access microphone");
+        }
       }
 
+      if (localVideo) {
+        localVideo.srcObject = localStream;
+        // Включаем звук для локального видео (для тестирования)
+        localVideo.muted = true; // Локальное видео обычно без звука
+      }
+
+      console.log("✅ Local stream initialized successfully with audio");
       return localStream;
     } catch (error) {
       console.error("❌ Error accessing media devices:", error);
 
+      // Финальная попытка - только базовое аудио
       try {
+        console.log("🔄 Trying basic audio only...");
         localStream = await navigator.mediaDevices.getUserMedia({
           audio: true,
-          video: false,
         });
+
+        const audioTracks = localStream.getAudioTracks();
+        console.log(`✅ Basic audio obtained ${audioTracks.length} tracks`);
 
         if (localVideo) {
           localVideo.srcObject = null;
         }
 
-        console.log("✅ Audio-only stream initialized");
         return localStream;
-      } catch (audioError) {
-        console.error("❌ Error accessing audio devices:", audioError);
-        showSystemMessage("❌ Не удалось получить доступ к камере/микрофону");
+      } catch (finalError) {
+        console.error("❌ All media access attempts failed:", finalError);
+        showSystemMessage(
+          "❌ Не удалось получить доступ к микрофону. Проверьте разрешения."
+        );
         throw error;
       }
     }
@@ -1661,8 +2109,9 @@
     }
 
     incomingCall = message;
-    callerNameEl.textContent = `${message.fromUserName} (${message.isGroupCall ? "Групповой звонок" : "Индивидуальный звонок"
-      })`;
+    callerNameEl.textContent = `${message.fromUserName} (${
+      message.isGroupCall ? "Групповой звонок" : "Индивидуальный звонок"
+    })`;
     incomingCallModal.classList.remove("hidden");
 
     setTimeout(() => {
@@ -1687,7 +2136,9 @@
         await initializeLocalStream();
       } catch (e) {
         console.error("Error initializing local stream for caller:", e);
-        showSystemMessage("⚠️ Нет доступа к камере/микрофону. Продолжаем без видео.");
+        showSystemMessage(
+          "⚠️ Нет доступа к камере/микрофону. Продолжаем без видео."
+        );
       }
       showVideoCallUI();
       setTimeout(() => {
@@ -1784,14 +2235,14 @@
 
   function handleCallEnded(message) {
     showSystemMessage(
-      `📞 ${message.endedBy
-        ? `Звонок завершен пользователем ${message.endedBy}`
-        : "Звонок завершен"
+      `📞 ${
+        message.endedBy
+          ? `Звонок завершен пользователем ${message.endedBy}`
+          : "Звонок завершен"
       }`
     );
     endCall();
   }
-
 
   function showRemoteVideo(sessionId, remoteStream) {
     const remoteVideoId = `remoteVideo_${sessionId}`;
@@ -1851,7 +2302,9 @@
   }
 
   async function createOffer(targetSessionId, attempt = 1) {
-    console.log(`📤 Creating offer for: ${targetSessionId} (attempt ${attempt})`);
+    console.log(
+      `📤 Creating offer for: ${targetSessionId} (attempt ${attempt})`
+    );
 
     if (offerInProgress.has(targetSessionId)) {
       console.log(`⏳ Offer already in progress for ${targetSessionId}`);
@@ -1874,7 +2327,7 @@
       }
 
       const pc = await createPeerConnection(targetSessionId);
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await new Promise((resolve) => setTimeout(resolve, 300));
 
       const offer = await pc.createOffer({
         offerToReceiveAudio: true,
@@ -1882,7 +2335,9 @@
       });
 
       await pc.setLocalDescription(offer);
-      console.log(`✅ Local description set for ${targetSessionId}, state: ${pc.signalingState}`);
+      console.log(
+        `✅ Local description set for ${targetSessionId}, state: ${pc.signalingState}`
+      );
 
       sendMessage({
         type: "webrtc_offer",
@@ -1904,7 +2359,9 @@
       // Повторяем попытку
       if (attempt < 3) {
         const delay = Math.min(2000 * attempt, 5000);
-        console.log(`🔄 Retrying offer creation for ${targetSessionId} in ${delay}ms...`);
+        console.log(
+          `🔄 Retrying offer creation for ${targetSessionId} in ${delay}ms...`
+        );
         setTimeout(() => createOffer(targetSessionId, attempt + 1), delay);
       }
     } finally {
@@ -1962,15 +2419,21 @@
         const existingPc = peerConnections.get(message.sessionId);
 
         // Пропускаем если уже есть активное соединение
-        if (existingPc &&
+        if (
+          existingPc &&
           (existingPc.connectionState === "connected" ||
-            existingPc.signalingState === "have-local-offer")) {
-          console.log(`✅ Already processing connection with new user ${message.userName}`);
+            existingPc.signalingState === "have-local-offer")
+        ) {
+          console.log(
+            `✅ Already processing connection with new user ${message.userName}`
+          );
           return;
         }
 
         if (!peerConnections.has(message.sessionId)) {
-          console.log(`🔄 Creating connection for new user: ${message.userName}`);
+          console.log(
+            `🔄 Creating connection for new user: ${message.userName}`
+          );
           setTimeout(() => {
             createOffer(message.sessionId);
           }, 2000);
@@ -2016,34 +2479,122 @@
     try {
       const pc = new RTCPeerConnection(configOverride || rtcConfig);
       pc.createdAt = Date.now();
-
-      // Инициализируем массив для отложенных ICE кандидатов
       pc.pendingIceCandidates = [];
 
-      // Гарантируем наличие приемников для аудио/видео
-      try {
-        const hasVideoSender = localStream && localStream.getVideoTracks().length > 0;
-        const hasAudioSender = localStream && localStream.getAudioTracks().length > 0;
-
-        if (!hasVideoSender) {
-          pc.addTransceiver("video", { direction: "recvonly" });
-        }
-        if (!hasAudioSender) {
+      // ГАРАНТИРУЕМ наличие локальных треков перед созданием предложения
+      if (localStream) {
+        // Явно добавляем все аудио треки
+        const audioTracks = localStream.getAudioTracks();
+        if (audioTracks.length > 0) {
+          audioTracks.forEach((track) => {
+            try {
+              console.log(`🎤 Adding audio track to ${targetSessionId}:`, {
+                enabled: track.enabled,
+                readyState: track.readyState,
+                kind: track.kind,
+              });
+              pc.addTrack(track, localStream);
+            } catch (error) {
+              console.error("Error adding audio track:", error);
+            }
+          });
+        } else {
+          console.warn("⚠️ No audio tracks available for local stream");
+          // Создаем приемник для аудио если нет локального трека
           pc.addTransceiver("audio", { direction: "recvonly" });
         }
-      } catch (e) {
-        console.warn("⚠️ Unable to add transceivers:", e);
+
+        // Добавляем видео треки если есть
+        const videoTracks = localStream.getVideoTracks();
+        if (videoTracks.length > 0) {
+          videoTracks.forEach((track) => {
+            try {
+              console.log(`🎥 Adding video track to ${targetSessionId}`);
+              pc.addTrack(track, localStream);
+            } catch (error) {
+              console.error("Error adding video track:", error);
+            }
+          });
+        } else {
+          // Создаем приемник для видео если нет локального трека
+          pc.addTransceiver("video", { direction: "recvonly" });
+        }
+      } else {
+        console.warn(
+          "⚠️ No local stream available, creating recvonly transceivers"
+        );
+        // Если нет локального потока, создаем приемники
+        pc.addTransceiver("audio", { direction: "recvonly" });
+        pc.addTransceiver("video", { direction: "recvonly" });
       }
 
       // Обработчик получения удаленных потоков
       pc.ontrack = (event) => {
-        console.log(
-          "📹 Received remote track from:",
-          targetSessionId,
-          event.streams
-        );
+        console.log("📹 Received remote track:", {
+          kind: event.track.kind,
+          readyState: event.track.readyState,
+          streams: event.streams.length,
+          sessionId: targetSessionId,
+        });
+
         if (event.streams && event.streams[0]) {
-          showRemoteVideo(targetSessionId, event.streams[0]);
+          const remoteStream = event.streams[0];
+
+          // Логируем детальную информацию о треках
+          const audioTracks = remoteStream.getAudioTracks();
+          const videoTracks = remoteStream.getVideoTracks();
+
+          console.log("🔊 Remote stream analysis:", {
+            audioTracks: audioTracks.length,
+            videoTracks: videoTracks.length,
+            audioTrackDetails: audioTracks.map((track) => ({
+              enabled: track.enabled,
+              readyState: track.readyState,
+              muted: track.muted,
+              kind: track.kind,
+            })),
+          });
+
+          // ВАЖНО: Проверяем и логируем состояние аудио треков
+          if (audioTracks.length > 0) {
+            audioTracks.forEach((track, index) => {
+              console.log(`🎵 Remote audio track ${index}:`, {
+                enabled: track.enabled,
+                readyState: track.readyState,
+                muted: track.muted,
+                id: track.id,
+              });
+
+              // Автоматически включаем аудио трек если он отключен
+              if (!track.enabled) {
+                console.log("🔊 Enabling disabled remote audio track");
+                track.enabled = true;
+              }
+            });
+          } else {
+            console.warn("⚠️ No audio tracks in remote stream!");
+          }
+
+          showRemoteVideo(targetSessionId, remoteStream);
+
+          // Автоматически включаем звук для удаленного видео
+          setTimeout(() => {
+            const remoteVideo = document.getElementById(
+              `remoteVideo_${targetSessionId}`
+            );
+            if (remoteVideo) {
+              remoteVideo.muted = false; // Включаем звук
+              remoteVideo.volume = 1.0; // Устанавливаем максимальную громкость
+              console.log("🔊 Unmuted remote video and set volume to 1.0");
+
+              // Пытаемся воспроизвести
+              remoteVideo.play().catch((e) => {
+                console.log(
+                  "⚠️ Auto-play prevented, user interaction required"
+                );
+              });
+            }
+          }, 1000);
         }
       };
 
@@ -2118,14 +2669,21 @@
 
       // Добавляем локальные треки
       if (localStream) {
-        localStream.getTracks().forEach((track) => {
+        localStream.getAudioTracks().forEach((track) => {
           try {
             pc.addTrack(track, localStream);
-            console.log(
-              `✅ Added local track to connection with ${targetSessionId}`
-            );
+            console.log(`🎤 Added audio track to ${targetSessionId}`);
           } catch (error) {
-            console.error("Error adding track:", error);
+            console.error("Error adding audio track:", error);
+          }
+        });
+
+        localStream.getVideoTracks().forEach((track) => {
+          try {
+            pc.addTrack(track, localStream);
+            console.log(`🎥 Added video track to ${targetSessionId}`);
+          } catch (error) {
+            console.error("Error adding video track:", error);
           }
         });
       }
@@ -2156,7 +2714,8 @@
     console.log(`Room Users: ${roomUsers.size}`);
     roomUsers.forEach((user, sessionId) => {
       console.log(
-        `- ${user.userName} (${sessionId}) ${sessionId === mySessionId ? "(You)" : ""
+        `- ${user.userName} (${sessionId}) ${
+          sessionId === mySessionId ? "(You)" : ""
         }`
       );
     });
@@ -2217,7 +2776,9 @@
         return;
       }
       lastIceRestartAt.set(sessionId, Date.now());
-      console.log(`🔁 Restarting ICE with ${sessionId} (${reason || "unknown"})`);
+      console.log(
+        `🔁 Restarting ICE with ${sessionId} (${reason || "unknown"})`
+      );
       const offer = await pc.createOffer({
         iceRestart: true,
         offerToReceiveAudio: true,
@@ -2240,7 +2801,9 @@
     try {
       const pc = peerConnections.get(sessionId);
       if (pc) {
-        try { pc.close(); } catch (e) { }
+        try {
+          pc.close();
+        } catch (e) {}
         peerConnections.delete(sessionId);
       }
       if (currentRoomId) {
@@ -2267,8 +2830,11 @@
         if (
           existingPc.signalingState === "stable" ||
           existingPc.connectionState === "connected"
-        ) return;
-        try { existingPc.close(); } catch (_) { }
+        )
+          return;
+        try {
+          existingPc.close();
+        } catch (_) {}
         peerConnections.delete(targetSessionId);
       }
 
@@ -2296,7 +2862,9 @@
     try {
       const pc = peerConnections.get(sessionId);
       if (pc) {
-        try { pc.close(); } catch (e) { }
+        try {
+          pc.close();
+        } catch (e) {}
         peerConnections.delete(sessionId);
       }
       if (currentRoomId) {
@@ -2318,7 +2886,6 @@
         pc.connectionState !== "connected" &&
         pc.connectionState !== "connecting"
     );
-
 
     // Обновляем только отключенные соединения с задержкой
     disconnectedConnections.forEach(async ([sessionId], index) => {
@@ -2353,7 +2920,6 @@
   //   }
   // }, 30000); // Увеличиваем до 30 секунд
 
-
   async function handleWebRTCOffer(message) {
     try {
       console.log(`📥 Received WebRTC offer from: ${message.fromSessionId}`);
@@ -2362,12 +2928,22 @@
       let pc = peerConnections.get(message.fromSessionId);
 
       // Если PeerConnection уже существует и работает - используем его
-      if (pc && (pc.connectionState === "connected" || pc.signalingState === "stable")) {
-        console.log(`✅ Already connected to ${message.fromSessionId}, reusing connection`);
+      if (
+        pc &&
+        (pc.connectionState === "connected" || pc.signalingState === "stable")
+      ) {
+        console.log(
+          `✅ Already connected to ${message.fromSessionId}, reusing connection`
+        );
       }
       // Если PeerConnection в плохом состоянии - пересоздаем
-      else if (pc && (pc.signalingState === "closed" || pc.connectionState === "failed")) {
-        console.log(`🔄 Replacing failed connection with ${message.fromSessionId}`);
+      else if (
+        pc &&
+        (pc.signalingState === "closed" || pc.connectionState === "failed")
+      ) {
+        console.log(
+          `🔄 Replacing failed connection with ${message.fromSessionId}`
+        );
         pc.close();
         peerConnections.delete(message.fromSessionId);
         pc = null;
@@ -2403,7 +2979,10 @@
       // При ошибке пересоздаем соединение
       if (message.fromSessionId && peerConnections.has(message.fromSessionId)) {
         const pc = peerConnections.get(message.fromSessionId);
-        if (pc.signalingState === "have-local-offer" || pc.connectionState === "failed") {
+        if (
+          pc.signalingState === "have-local-offer" ||
+          pc.connectionState === "failed"
+        ) {
           pc.close();
           peerConnections.delete(message.fromSessionId);
 
@@ -2441,7 +3020,9 @@
       }
 
       if (pc.signalingState !== "have-local-offer") {
-        console.warn(`⚠️ Wrong signaling state for answer: ${pc.signalingState}, expected have-local-offer`);
+        console.warn(
+          `⚠️ Wrong signaling state for answer: ${pc.signalingState}, expected have-local-offer`
+        );
 
         // Если соединение в плохом состоянии, пересоздаем его
         if (pc.signalingState === "closed" || pc.connectionState === "failed") {
@@ -2539,13 +3120,17 @@
         peerConnections.delete(message.sessionId);
         console.log(`🗑️ Removed peer connection for ${message.userName}`);
       } else {
-        console.log(`⏳ Keeping peer connection for ${message.userName} (state: ${pc.connectionState})`);
+        console.log(
+          `⏳ Keeping peer connection for ${message.userName} (state: ${pc.connectionState})`
+        );
         // Установим таймер для окончательного удаления через 30 секунд
         setTimeout(() => {
           if (peerConnections.has(message.sessionId)) {
             peerConnections.get(message.sessionId).close();
             peerConnections.delete(message.sessionId);
-            console.log(`🗑️ Final removal of peer connection for ${message.userName}`);
+            console.log(
+              `🗑️ Final removal of peer connection for ${message.userName}`
+            );
           }
         }, 30000);
       }
@@ -2600,7 +3185,8 @@
     console.log(`Total in room: ${roomUsers.size}`);
     roomUsers.forEach((user, sessionId) => {
       console.log(
-        `- ${user.userName} (${sessionId}) ${sessionId === mySessionId ? "(You)" : ""
+        `- ${user.userName} (${sessionId}) ${
+          sessionId === mySessionId ? "(You)" : ""
         }`
       );
     });
@@ -2771,31 +3357,37 @@
 
     let disconnectedCount = 0;
     const otherUsers = Array.from(roomUsers.values()).filter(
-      user => user.sessionId !== mySessionId
+      (user) => user.sessionId !== mySessionId
     );
 
-    otherUsers.forEach(user => {
+    otherUsers.forEach((user) => {
       const pc = peerConnections.get(user.sessionId);
 
-      if (!pc ||
+      if (
+        !pc ||
         pc.connectionState !== "connected" ||
-        pc.iceConnectionState !== "connected") {
+        pc.iceConnectionState !== "connected"
+      ) {
         disconnectedCount++;
         console.log(`⚠️ Connection issue with ${user.userName}:`, {
           connectionState: pc?.connectionState,
           iceState: pc?.iceConnectionState,
-          signalingState: pc?.signalingState
+          signalingState: pc?.signalingState,
         });
       }
     });
 
     // Если больше половины соединений имеют проблемы
-    if (disconnectedCount > 0 && disconnectedCount >= Math.ceil(otherUsers.length / 2)) {
-      console.log(`🔄 Auto-refreshing ${disconnectedCount} problematic connections`);
+    if (
+      disconnectedCount > 0 &&
+      disconnectedCount >= Math.ceil(otherUsers.length / 2)
+    ) {
+      console.log(
+        `🔄 Auto-refreshing ${disconnectedCount} problematic connections`
+      );
       refreshAllConnections();
     }
   }, 15000); // Проверка каждые 15 секунд
-
 
   function refreshAllConnections() {
     if (!isInCall) return;
@@ -2803,7 +3395,7 @@
     console.log("🔄 Manually refreshing all connections...");
 
     const otherUsers = Array.from(roomUsers.values()).filter(
-      user => user.sessionId !== mySessionId
+      (user) => user.sessionId !== mySessionId
     );
 
     otherUsers.forEach((user, index) => {
@@ -2811,13 +3403,16 @@
         const existingPc = peerConnections.get(user.sessionId);
 
         // Пересоздаем соединение только если оно не активно
-        if (!existingPc ||
+        if (
+          !existingPc ||
           existingPc.connectionState !== "connected" ||
-          existingPc.iceConnectionState !== "connected") {
-
+          existingPc.iceConnectionState !== "connected"
+        ) {
           console.log(`🔄 Refreshing connection with ${user.userName}`);
           if (existingPc) {
-            try { existingPc.close(); } catch (e) { }
+            try {
+              existingPc.close();
+            } catch (e) {}
             peerConnections.delete(user.sessionId);
           }
           createOffer(user.sessionId);
@@ -2825,29 +3420,6 @@
       }, index * 3000); // 3 секунды между каждым
     });
   }
-
-  // Добавьте кнопку для ручного обновления в UI
-  function addManualRefreshButton() {
-    if (!document.getElementById('manualRefreshBtn')) {
-      const refreshBtn = document.createElement('button');
-      refreshBtn.id = 'manualRefreshBtn';
-      refreshBtn.textContent = '🔄 Обновить соединения';
-      refreshBtn.style.position = 'fixed';
-      refreshBtn.style.bottom = '10px';
-      refreshBtn.style.right = '10px';
-      refreshBtn.style.zIndex = '1000';
-      refreshBtn.style.background = '#f59e0b';
-      refreshBtn.style.color = 'white';
-      refreshBtn.style.border = 'none';
-      refreshBtn.style.padding = '8px 12px';
-      refreshBtn.style.borderRadius = '4px';
-      refreshBtn.style.cursor = 'pointer';
-
-      refreshBtn.addEventListener('click', refreshAllConnections);
-      document.body.appendChild(refreshBtn);
-    }
-  }
-
 
   // Инициализация при загрузке
   window.addEventListener("DOMContentLoaded", () => {
