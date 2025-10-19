@@ -331,8 +331,10 @@
     scrollToBottom();
   }
 
-  function handleNotificationAction(data) {
-    const { action, notification } = data;
+  function handleNotificationAction(payload) {
+    // payload: { action, data }
+    const action = payload && payload.action;
+    const data = payload && payload.data ? payload.data : {};
 
     switch (action) {
       case "open":
@@ -340,26 +342,47 @@
         scrollToBottom();
         break;
       case "accept-call":
+        // Если входящий звонок уже есть в памяти - используем его
         if (incomingCall) {
           acceptCall();
+        } else if (data && data.roomId) {
+          // Иначе пытаемся присоединиться по roomId (возможно уведомление пришло при закрытой вкладке)
+          (async () => {
+            try {
+              await initializeLocalStream();
+            } catch (e) {
+              console.warn("Не удалось получить медиапоток перед присоединением:", e);
+            }
+            currentRoomId = data.roomId;
+            // Попытка присоединиться к комнате
+            sendMessage({ type: "join_room", roomId: data.roomId });
+            showVideoCallUI();
+            showSystemMessage("✅ Вы присоединились к звонку (через уведомление)");
+          })();
         }
         break;
       case "reject-call":
         if (incomingCall) {
           rejectCall();
+        } else if (data && data.roomId) {
+          sendMessage({ type: "call_rejected", roomId: data.roomId });
+          showSystemMessage("❌ Вы отклонили звонок (через уведомление)");
         }
         break;
       case "join-call":
-        // Логика присоединения к групповому звонку
-        if (activeCalls.length > 0) {
+        if (data && data.roomId) {
+          joinGroupCall(data.roomId);
+        } else if (activeCalls.length > 0) {
           joinGroupCall(activeCalls[0].roomId);
         }
         break;
+      default:
+        console.log("Неизвестное действие уведомления:", action, data);
     }
-
-    // Закрываем уведомление
-    notification.close();
   }
+
+  // Экспортируем обработчик для inline-скрипта в index.html
+  window.handleNotificationAction = handleNotificationAction;
 
   function handleVisibilityChange() {
     if (document.hidden) {
@@ -1171,9 +1194,15 @@
       // Регистрируем сервис-воркер
       if ("serviceWorker" in navigator) {
         try {
-          const registration = await navigator.serviceWorker.register("/sw.js");
-          serviceWorkerRegistration = registration;
-          console.log("✅ Service Worker зарегистрирован");
+          // Если registration уже выставлен в window (index.html), используем его
+          if (window.serviceWorkerRegistration) {
+            serviceWorkerRegistration = window.serviceWorkerRegistration;
+            console.log("✅ Service Worker регистрация получена из window");
+          } else {
+            const registration = await navigator.serviceWorker.register("/sw.js");
+            serviceWorkerRegistration = registration;
+            console.log("✅ Service Worker зарегистрирован");
+          }
         } catch (error) {
           console.warn("⚠️ Service Worker не зарегистрирован:", error);
         }
@@ -1209,43 +1238,51 @@
 
   // Функция для отправки уведомления о новом сообщении
   function notifyNewMessage(message) {
-    showNotification(`Новое сообщение от ${message.name}`, {
+    const title = `Новое сообщение от ${message.name}`;
+    const options = {
       body: message.text || "📎 Вложение",
-      tag: "new-message",
-      requireInteraction: true,
+      tag: `new-message-${message.id || ''}`,
+      requireInteraction: false,
+      data: { type: 'message', messageId: message.id, from: message.name },
       actions: [
-        {
-          action: "open",
-          title: "📖 Открыть чат",
-        },
-        {
-          action: "close",
-          title: "❌ Закрыть",
-        },
+        { action: "open", title: "📖 Открыть чат" },
+        { action: "close", title: "❌ Закрыть" },
       ],
-    });
+    };
+
+    if (serviceWorkerRegistration && serviceWorkerRegistration.showNotification) {
+      serviceWorkerRegistration.showNotification(title, options);
+    } else {
+      showNotification(title, options);
+    }
   }
 
   // Функция для уведомления о входящем звонке
   function notifyIncomingCall(callInfo) {
-    showNotification(`Входящий звонок от ${callInfo.fromUserName}`, {
-      body: callInfo.isGroupCall
-        ? "👥 Групповой звонок"
-        : "📞 Индивидуальный звонок",
+    const title = `Входящий звонок от ${callInfo.fromUserName}`;
+    const body = callInfo.isGroupCall ? "👥 Групповой звонок" : "📞 Индивидуальный звонок";
+    const options = {
+      body,
       tag: "incoming-call",
       requireInteraction: true,
       vibrate: [500, 200, 500, 200, 500],
+      data: {
+        type: "call",
+        roomId: callInfo.roomId,
+        isGroupCall: !!callInfo.isGroupCall,
+        fromUserName: callInfo.fromUserName,
+      },
       actions: [
-        {
-          action: "accept-call",
-          title: "📞 Принять",
-        },
-        {
-          action: "reject-call",
-          title: "❌ Отклонить",
-        },
+        { action: "accept-call", title: "📞 Принять" },
+        { action: "reject-call", title: "❌ Отклонить" },
       ],
-    });
+    };
+
+    if (serviceWorkerRegistration && serviceWorkerRegistration.showNotification) {
+      serviceWorkerRegistration.showNotification(title, options);
+    } else {
+      showNotification(title, options);
+    }
   }
 
   // Функция для уведомления о системных событиях
