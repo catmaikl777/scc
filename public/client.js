@@ -48,9 +48,6 @@
   let notificationPermission = false;
   let serviceWorkerRegistration = null;
 
-  let messaging = null;
-  let fcmToken = null;
-
   let reconnectAttempts = 0;
   const maxReconnectAttempts = 5;
   const reconnectDelay = 3000;
@@ -163,157 +160,14 @@
   };
 
   // Инициализация приложения
-  async function init() {
+  function init() {
     setupEventListeners();
     initializeEmojiPanel();
     initializeVoiceRecording();
     initializeNotifications();
     loadUserName();
-<<<<<<< HEAD
-    await initializeFirebase();
     connectWebSocket();
     preloadMicrophoneAccess();
-  }
-
-  async function initializeFirebase() {
-    try {
-      // Проверяем поддержку Firebase
-      if (typeof firebase === "undefined") {
-        console.warn("⚠️ Firebase not loaded");
-        return;
-      }
-
-      // Firebase конфигурация - ЗАМЕНИТЕ на вашу из Firebase Console
-      const firebaseConfig = {
-        apiKey: "AIzaSyAJkEmBpFS2KEkQEmRX8Whg3mmHq8-P01k",
-        authDomain: "firecatchat-6eb3a.firebaseapp.com",
-        projectId: "firecatchat-6eb3a",
-        storageBucket: "firecatchat-6eb3a.firebasestorage.app",
-        messagingSenderId: "451383593989",
-        appId: "1:451383593989:web:3a26800f883bd0c7dce06c",
-        measurementId: "G-W20Q520LX5"
-      };
-
-      // Инициализируем Firebase
-      firebase.initializeApp(firebaseConfig);
-      messaging = firebase.messaging();
-
-      // Запрашиваем разрешение на уведомления
-      const permission = await Notification.requestPermission();
-      if (permission === "granted") {
-        console.log("✅ Notification permission granted");
-
-        // Получаем FCM токен
-        await getFCMToken();
-
-        // Настраиваем обработчик сообщений
-        setupFirebaseMessageHandlers();
-      } else {
-        console.log("❌ Notification permission denied");
-      }
-    } catch (error) {
-      console.error("❌ Firebase initialization error:", error);
-    }
-  }
-
-  // Функция получения FCM токена
-  async function getFCMToken() {
-    try {
-      // Регистрируем Service Worker для FCM
-      const registration = await navigator.serviceWorker.register(
-        "/firebase-messaging-sw.js"
-      );
-      console.log("✅ FCM Service Worker registered");
-
-      // Устанавливаем VAPID ключ - ЗАМЕНИТЕ на ваш из Firebase Console
-      await messaging.useServiceWorker(registration);
-      await messaging.usePublicVapidKey("YOUR_VAPID_PUBLIC_KEY");
-
-      // Получаем токен
-      fcmToken = await messaging.getToken();
-      console.log("✅ FCM Token:", fcmToken);
-
-      // Отправляем токен на сервер
-      if (fcmToken && isConnected) {
-        sendMessage({
-          type: "fcm_token",
-          token: fcmToken,
-          userId: myId,
-        });
-      }
-
-      // Обработка обновления токена
-      messaging.onTokenRefresh(async () => {
-        fcmToken = await messaging.getToken();
-        console.log("🔄 FCM Token refreshed:", fcmToken);
-
-        if (fcmToken && isConnected) {
-          sendMessage({
-            type: "fcm_token",
-            token: fcmToken,
-            userId: myId,
-          });
-        }
-      });
-    } catch (error) {
-      console.error("❌ Error getting FCM token:", error);
-    }
-  }
-
-  // Настройка обработчиков сообщений FCM
-  function setupFirebaseMessageHandlers() {
-    // Обработка сообщений когда приложение активно
-    messaging.onMessage((payload) => {
-      console.log("📨 Received foreground message:", payload);
-
-      // Показываем уведомление даже когда приложение активно
-      showLocalNotification(payload);
-    });
-
-    // Обработка сообщений от Service Worker
-    navigator.serviceWorker.addEventListener("message", (event) => {
-      if (event.data && event.data.type === "NOTIFICATION_CLICK") {
-        handleNotificationClick(event.data.data);
-      }
-    });
-  }
-
-  // Функция показа локального уведомления
-  function showLocalNotification(payload) {
-    const title = payload.data?.title || "Огненный Кот";
-    const options = {
-      body: payload.data?.body || "Новое сообщение",
-      icon: "/favicon.ico",
-      badge: "/favicon.ico",
-      data: payload.data,
-      actions: [
-        {
-          action: "open",
-          title: "📖 Открыть чат",
-        },
-        {
-          action: "close",
-          title: "❌ Закрыть",
-        },
-      ],
-      tag: payload.data?.tag || "default",
-      requireInteraction: true,
-    };
-
-    // Используем стандартные уведомления
-    if ("Notification" in window && Notification.permission === "granted") {
-      const notification = new Notification(title, options);
-
-      notification.onclick = (event) => {
-        event.preventDefault();
-        handleNotificationClick({ notification: options.data });
-        notification.close();
-      };
-    }
-=======
-    connectWebSocket();
-    preloadMicrophoneAccess();
->>>>>>> be2c4d809f2d20b6a11bc0a869c500c2634f9348
   }
 
   function debugConnectionsDetailed() {
@@ -492,25 +346,8 @@
   }
 
   function handleNotificationClick(data) {
-    console.log("🔔 Handling notification click:", data);
-
-    // Фокусируем окно
+    // Фокусируем окно при клике на уведомление
     window.focus();
-
-    // Обрабатываем действия
-    if (data.action === "accept-call") {
-      if (incomingCall) {
-        acceptCall();
-      }
-    } else if (data.action === "reject-call") {
-      if (incomingCall) {
-        rejectCall();
-      }
-    } else if (data.action === "join-call") {
-      if (activeCalls.length > 0) {
-        joinGroupCall(activeCalls[0].roomId);
-      }
-    }
 
     // Прокручиваем к последним сообщениям
     scrollToBottom();
@@ -1584,44 +1421,43 @@
 
   // Функция для отправки уведомления о новом сообщении
   function notifyNewMessage(message) {
-    // Отправляем на сервер для push-уведомления
-    if (isConnected) {
-      sendMessage({
-        type: "send_notification",
-        title: `💬 Новое сообщение от ${message.name}`,
-        body: message.text || "📎 Вложение",
-        tag: "new-message",
-        userId: message.id, // ID отправителя (чтобы не слать себе)
-        data: {
-          type: "new_message",
-          messageId: message.ts || Date.now(),
-          fromUserId: message.id,
-          fromUserName: message.name,
+    showNotification(`Новое сообщение от ${message.name}`, {
+      body: message.text || "📎 Вложение",
+      tag: "new-message",
+      requireInteraction: true,
+      actions: [
+        {
+          action: "open",
+          title: "📖 Открыть чат",
         },
-      });
-    }
+        {
+          action: "close",
+          title: "❌ Закрыть",
+        },
+      ],
+    });
   }
 
   // Функция для уведомления о входящем звонке
   function notifyIncomingCall(callInfo) {
-    if (isConnected) {
-      sendMessage({
-        type: "send_notification",
-        title: `📞 Входящий звонок от ${callInfo.fromUserName}`,
-        body: callInfo.isGroupCall
-          ? "👥 Групповой звонок"
-          : "📞 Индивидуальный звонок",
-        tag: "incoming-call",
-        userId: callInfo.fromUserId, // Не слать самому себе
-        data: {
-          type: "incoming_call",
-          roomId: callInfo.roomId,
-          isGroupCall: callInfo.isGroupCall,
-          fromUserId: callInfo.fromUserId,
-          fromUserName: callInfo.fromUserName,
+    showNotification(`Входящий звонок от ${callInfo.fromUserName}`, {
+      body: callInfo.isGroupCall
+        ? "👥 Групповой звонок"
+        : "📞 Индивидуальный звонок",
+      tag: "incoming-call",
+      requireInteraction: true,
+      vibrate: [500, 200, 500, 200, 500],
+      actions: [
+        {
+          action: "accept-call",
+          title: "📞 Принять",
         },
-      });
-    }
+        {
+          action: "reject-call",
+          title: "❌ Отклонить",
+        },
+      ],
+    });
   }
 
   // Функция для уведомления о системных событиях
