@@ -169,6 +169,7 @@
     initializeVoiceRecording();
     initializeNotifications();
     loadUserName();
+<<<<<<< HEAD
     await initializeFirebase();
     connectWebSocket();
     preloadMicrophoneAccess();
@@ -309,6 +310,10 @@
         notification.close();
       };
     }
+=======
+    connectWebSocket();
+    preloadMicrophoneAccess();
+>>>>>>> be2c4d809f2d20b6a11bc0a869c500c2634f9348
   }
 
   function debugConnectionsDetailed() {
