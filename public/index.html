@@ -3,6 +3,27 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#dc2626" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <meta name="apple-mobile-web-app-title" content="Огненный Кот" />
+    <link rel="apple-touch-icon" href="/favicon.ico" />
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Огненный Кот">
+    <link rel="apple-touch-icon" href="/favicon.ico">
+    <meta name="msapplication-TileColor" content="#dc2626">
+    <meta name="theme-color" content="#dc2626">
+    <meta name="mobile-web-app-capable" content="yes">
+
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-messaging-compat.js"></script>
+
     <title>ЧАТ ОГНЕННЫЙ КОТ</title>
     <style>
       :root {
@@ -365,6 +386,35 @@
       #fileUploadBtn:active {
         background: var(--primary-blue);
         transform: scale(0.95);
+      }
+
+      /* Кнопка голосовых сообщений */
+      #voiceMessageBtn {
+        background: var(--primary-red);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        padding: 12px;
+        border-radius: 50%;
+        cursor: pointer;
+        width: 44px;
+        height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        font-size: 16px;
+        transition: all 0.2s;
+        box-shadow: var(--shadow-primary);
+      }
+
+      #voiceMessageBtn:active {
+        background: #b91c1c;
+        transform: scale(0.95);
+      }
+
+      #voiceMessageBtn.recording {
+        background: #dc2626;
+        animation: pulse 1.5s infinite;
       }
 
       /* Эмодзи панель */
@@ -945,6 +995,183 @@
         outline-offset: 2px;
       }
 
+      /* Стили для голосовых сообщений */
+      .voice-message {
+        max-width: min(400px, 90%);
+        margin: 8px 0;
+      }
+
+      .voice-player {
+        background: var(--bg-tertiary);
+        border-radius: 12px;
+        padding: 12px;
+        margin-top: 8px;
+        border: 1px solid var(--border-color);
+      }
+
+      .voice-controls {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 8px;
+      }
+
+      .play-pause-btn {
+        background: var(--primary-blue);
+        border: none;
+        color: white;
+        padding: 8px;
+        border-radius: 50%;
+        cursor: pointer;
+        width: 36px;
+        height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        transition: all 0.2s;
+      }
+
+      .play-pause-btn:active {
+        background: #1d4ed8;
+        transform: scale(0.95);
+      }
+
+      .voice-visualization {
+        flex: 1;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        padding: 0 8px;
+      }
+
+      .voice-bar {
+        flex: 1;
+        background: var(--primary-blue);
+        border-radius: 2px;
+        transition: height 0.1s ease;
+        min-height: 2px;
+      }
+
+      .voice-duration {
+        font-size: 12px;
+        color: var(--text-muted);
+        min-width: 40px;
+        text-align: center;
+      }
+
+      .voice-progress {
+        width: 100%;
+        height: 4px;
+        background: var(--bg-secondary);
+        border-radius: 2px;
+        overflow: hidden;
+        margin-top: 4px;
+      }
+
+      .voice-progress-bar {
+        height: 100%;
+        background: var(--primary-blue);
+        border-radius: 2px;
+        transition: width 0.1s ease;
+        width: 0%;
+      }
+
+      /* Модальное окно записи голоса */
+      .voice-record-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(15, 23, 42, 0.95);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 2000;
+        padding: 20px;
+      }
+
+      .voice-record-modal.hidden {
+        display: none;
+      }
+
+      .voice-record-content {
+        background: var(--bg-secondary);
+        padding: 24px;
+        border-radius: 16px;
+        text-align: center;
+        width: min(320px, 90vw);
+        max-width: 100%;
+        border: 1px solid var(--border-color);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+      }
+
+      .voice-record-visualization {
+        height: 80px;
+        display: flex;
+        align-items: end;
+        justify-content: center;
+        gap: 3px;
+        margin: 20px 0;
+        padding: 0 20px;
+      }
+
+      .voice-record-bar {
+        width: 6px;
+        background: var(--primary-red);
+        border-radius: 3px;
+        transition: height 0.1s ease;
+        min-height: 2px;
+      }
+
+      .voice-record-timer {
+        font-size: 24px;
+        font-weight: bold;
+        color: var(--text-primary);
+        margin: 16px 0;
+      }
+
+      .voice-record-controls {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+        margin-top: 20px;
+      }
+
+      .voice-record-controls button {
+        padding: 12px 20px;
+        border: none;
+        border-radius: 20px;
+        cursor: pointer;
+        font-size: 16px;
+        font-weight: 500;
+        min-height: 44px;
+        min-width: 100px;
+        transition: all 0.2s;
+      }
+
+      .stop-record-btn {
+        background: var(--primary-red);
+        color: white;
+      }
+
+      .stop-record-btn:active {
+        background: #b91c1c;
+        transform: scale(0.95);
+      }
+
+      .cancel-record-btn {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+      }
+
+      .cancel-record-btn:active {
+        background: var(--border-color);
+        transform: scale(0.95);
+      }
+
       /* Адаптивность */
       @media (max-width: 768px) {
         .sidebar-toggle {
@@ -994,6 +1221,18 @@
           min-width: 40px;
           min-height: 40px;
           padding: 8px;
+        }
+
+        .voice-record-content {
+          padding: 20px;
+        }
+
+        .voice-record-controls {
+          flex-direction: column;
+        }
+
+        .voice-record-controls button {
+          min-width: 100%;
         }
       }
 
@@ -1115,245 +1354,6 @@
         }
       }
 
-      /* Добавьте эти стили в конец CSS */
-      .video-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-        gap: 10px;
-        padding: 10px;
-        flex: 1;
-        overflow: auto;
-      }
-
-      .video-container {
-        position: relative;
-        background: var(--bg-secondary);
-        border-radius: 12px;
-        overflow: hidden;
-        aspect-ratio: 4/3;
-        min-height: 200px;
-      }
-
-      .video-container video {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-      }
-
-      .video-label {
-        position: absolute;
-        top: 8px;
-        left: 8px;
-        background: rgba(0, 0, 0, 0.7);
-        color: white;
-        padding: 4px 8px;
-        border-radius: 6px;
-        font-size: 12px;
-        z-index: 1;
-      }
-
-      /* Стиль для локального видео (зеркальное отображение) */
-      #localVideo {
-        transform: scaleX(
-          -1
-        ); /* Зеркальное отображение для фронтальной камеры */
-      }
-
-      /* Адаптивность для видео сетки */
-      @media (max-width: 768px) {
-        .video-grid {
-          grid-template-columns: 1fr;
-        }
-
-        .video-container {
-          aspect-ratio: 16/9;
-        }
-      }
-
-      /* Стили для динамических видео контейнеров */
-      .video-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-        gap: 10px;
-        padding: 10px;
-        flex: 1;
-        overflow: auto;
-      }
-
-      .video-container {
-        position: relative;
-        background: var(--bg-secondary);
-        border-radius: 12px;
-        overflow: hidden;
-        aspect-ratio: 4/3;
-        min-height: 200px;
-        border: 2px solid var(--border-color);
-      }
-
-      .video-container video {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        background: var(--bg-tertiary);
-      }
-
-      .video-label {
-        position: absolute;
-        top: 8px;
-        left: 8px;
-        background: rgba(0, 0, 0, 0.7);
-        color: white;
-        padding: 4px 8px;
-        border-radius: 6px;
-        font-size: 12px;
-        z-index: 1;
-      }
-
-      /* Стиль для локального видео */
-      #localVideo {
-        transform: scaleX(-1);
-      }
-
-      /* Адаптивность для видео сетки */
-      @media (max-width: 768px) {
-        .video-grid {
-          grid-template-columns: 1fr;
-        }
-
-        .video-container {
-          aspect-ratio: 16/9;
-        }
-      }
-
-      .video-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-        gap: 10px;
-        padding: 10px;
-        flex: 1;
-        overflow: auto;
-        align-content: start;
-      }
-
-      .video-container {
-        position: relative;
-        background: var(--bg-secondary);
-        border-radius: 12px;
-        overflow: hidden;
-        aspect-ratio: 4/3;
-        min-height: 200px;
-        border: 2px solid var(--border-color);
-      }
-
-      .video-container video {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        background: var(--bg-tertiary);
-      }
-
-      #localVideo {
-        transform: scaleX(
-          -1
-        ); /* Зеркальное отображение для фронтальной камеры */
-      }
-
-      /* Исправленные стили для видео сетки */
-      .video-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-        gap: 10px;
-        padding: 10px;
-        flex: 1;
-        overflow: auto;
-        align-content: start;
-        max-height: calc(100vh - 140px);
-        scrollbar-width: thin;
-        scrollbar-color: var(--primary-blue) var(--bg-primary);
-      }
-
-      .video-grid::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-      }
-
-      .video-grid::-webkit-scrollbar-track {
-        background: var(--bg-primary);
-        border-radius: 4px;
-      }
-
-      .video-grid::-webkit-scrollbar-thumb {
-        background: var(--primary-blue);
-        border-radius: 4px;
-      }
-
-      .video-grid::-webkit-scrollbar-thumb:hover {
-        background: var(--primary-red);
-      }
-
-      .video-container {
-        position: relative;
-        background: var(--bg-secondary);
-        border-radius: 12px;
-        overflow: hidden;
-        aspect-ratio: 4/3;
-        min-height: 200px;
-        border: 2px solid var(--border-color);
-        transition: all 0.3s ease;
-      }
-
-      .video-container video {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        background: var(--bg-tertiary);
-      }
-
-      /* Адаптивность для видео сетки */
-      @media (max-width: 1200px) {
-        .video-grid {
-          grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        }
-      }
-
-      @media (max-width: 768px) {
-        .video-grid {
-          grid-template-columns: 1fr;
-          gap: 8px;
-          padding: 8px;
-        }
-
-        .video-container {
-          aspect-ratio: 16/9;
-          min-height: 180px;
-        }
-      }
-
-      @media (max-width: 480px) {
-        .video-grid {
-          grid-template-columns: 1fr;
-        }
-
-        .video-container {
-          aspect-ratio: 4/3;
-          min-height: 160px;
-        }
-      }
-
-      /* Для ландшафтной ориентации на мобильных */
-      @media (orientation: landscape) and (max-height: 500px) {
-        .video-grid {
-          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-          gap: 5px;
-          padding: 5px;
-        }
-
-        .video-container {
-          aspect-ratio: 4/3;
-          min-height: 120px;
-        }
-      }
-
       .quick-join-call {
         background: rgba(59, 130, 246, 0.1) !important;
         border: 1px solid var(--primary-blue) !important;
@@ -1459,6 +1459,13 @@
             autocomplete="off"
             placeholder="Сообщение..."
           />
+          <button
+            type="button"
+            id="voiceMessageBtn"
+            title="Записать голосовое сообщение"
+          >
+            🎤
+          </button>
           <button type="button" id="fileUploadBtn" title="Отправить файл">
             📎
           </button>
@@ -1473,25 +1480,7 @@
       </main>
     </div>
 
-    <div id="nameModal" class="modal">
-      <div class="modal-content">
-        <h3>Добро пожаловать в ОГНЕННЫЙ КОТ!</h3>
-        <p>Введите ваше имя для чата:</p>
-        <input
-          type="text"
-          id="initialNameInput"
-          placeholder="Ваше имя"
-          maxlength="50"
-        />
-        <div class="modal-buttons">
-          <button id="confirmName" class="accept-btn">Продолжить</button>
-        </div>
-        <p style="margin-top: 10px; font-size: 12px; color: #888">
-          Имя будет сохранено для будущих посещений
-        </p>
-      </div>
-    </div>
-
+    <!-- Модальное окно входящего звонка -->
     <div id="incomingCallModal" class="modal hidden">
       <div class="modal-content">
         <h3>Входящий видеозвонок</h3>
@@ -1503,10 +1492,28 @@
       </div>
     </div>
 
+    <!-- Модальное окно записи голосового сообщения -->
+    <div id="voiceRecordModal" class="voice-record-modal hidden">
+      <div class="voice-record-content">
+        <h3>Запись голосового сообщения</h3>
+        <div class="voice-record-visualization" id="voiceRecordVisualization">
+          <!-- Барчики визуализации будут добавляться динамически -->
+        </div>
+        <div class="voice-record-timer" id="voiceRecordTimer">00:00</div>
+        <div class="voice-record-controls">
+          <button id="stopRecordBtn" class="stop-record-btn">
+            ⏹️ Отправить
+          </button>
+          <button id="cancelRecordBtn" class="cancel-record-btn">
+            ❌ Отмена
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Подключение библиотеки частиц -->
     <script src="https://cdn.jsdelivr.net/particles.js/2.0.0/particles.min.js"></script>
 
-    <!-- Добавьте этот скрипт перед закрывающим тегом body -->
     <script>
       // Глобальные функции для работы с файлами
       window.downloadFile = function (filename, filetype, base64Data) {
@@ -1552,6 +1559,45 @@
         },
         retina_detect: true,
       });
+    </script>
+
+    <script>
+      // Регистрация Service Worker
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", function () {
+          navigator.serviceWorker
+            .register("/sw.js")
+            .then(function (registration) {
+              console.log("ServiceWorker зарегистрирован: ", registration);
+            })
+            .catch(function (error) {
+              console.log("Ошибка регистрации ServiceWorker: ", error);
+            });
+        });
+      }
+
+      // Обработчик сообщений от Service Worker
+      navigator.serviceWorker.addEventListener("message", (event) => {
+        const { action, data } = event.data;
+
+        switch (action) {
+          case "notification-click":
+            // Фокусируем окно
+            window.focus();
+            break;
+          case "notification-action":
+            // Обрабатываем действия из уведомлений
+            handleNotificationAction(data);
+            break;
+        }
+      });
+
+      function handleNotificationAction(data) {
+        // Эта функция будет переопределена в client.js
+        if (window.handleNotificationAction) {
+          window.handleNotificationAction(data);
+        }
+      }
     </script>
 
     <script src="client.js"></script>
