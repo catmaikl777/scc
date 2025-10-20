@@ -1,102 +1,62 @@
-// sw.js - ИСПРАВЛЕННАЯ ВЕРСИЯ
-const CACHE_NAME = 'fire-cat-chat-v2';
+// sw.js
+const CACHE_NAME = 'firecat-chat-v1';
+const urlsToCache = [
+  '/',
+  '/index.html',
+  '/client.js',
+  '/favicon.ico'
+];
 
-self.addEventListener('install', event => {
-  console.log('🛠 Service Worker installing...');
-  self.skipWaiting();
-});
-
-self.addEventListener('activate', event => {
-  console.log('✅ Service Worker activated');
-  event.waitUntil(self.clients.claim());
-});
-
-self.addEventListener('push', event => {
-  console.log('📨 Push message received', event);
-  
-  let data = {};
-  try {
-    data = event.data ? event.data.json() : {};
-  } catch (error) {
-    console.error('Error parsing push data:', error);
-    data = { 
-      title: 'Огненный Кот', 
-      body: 'Новое уведомление',
-      icon: '/favicon.ico'
-    };
-  }
-
-  const options = {
-    body: data.body || 'Новое уведомление',
-    icon: data.icon || '/favicon.ico',
-    badge: '/favicon.ico',
-    vibrate: [200, 100, 200],
-    data: data.data || {},
-    actions: data.actions || [],
-    tag: data.tag || 'default',
-    requireInteraction: data.requireInteraction || false
-  };
-
+self.addEventListener('install', (event) => {
   event.waitUntil(
-    self.registration.showNotification(data.title || 'Огненный Кот', options)
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(urlsToCache))
   );
 });
 
-self.addEventListener('notificationclick', event => {
-  console.log('🔔 Notification clicked', event);
-  
-  event.notification.close();
+self.addEventListener('fetch', (event) => {
+  event.respondWith(
+    caches.match(event.request)
+      .then((response) => response || fetch(event.request))
+  );
+});
 
-  const { action, notification } = event;
+self.addEventListener('push', (event) => {
+  const data = event.data.json();
   
-  if (action === 'close') {
-    return;
-  }
+  const options = {
+    body: data.body,
+    icon: '/favicon.ico',
+    badge: '/favicon.ico',
+    vibrate: [200, 100, 200],
+    data: data.data,
+    actions: data.actions || []
+  };
 
   event.waitUntil(
-    clients.matchAll({ 
-      type: 'window',
-      includeUncontrolled: true 
-    }).then(clientList => {
-      // Ищем открытое окно
-      for (const client of clientList) {
-        if (client.url.includes(self.location.origin) && 'focus' in client) {
-          client.focus();
-          
-          // Отправляем сообщение в основное приложение
-          client.postMessage({
-            action: action ? 'notification-action' : 'notification-click',
-            data: { 
-              action, 
-              notification: notification.data,
-              tag: notification.tag 
-            }
-          });
-          return;
+    self.registration.showNotification(data.title, options)
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  
+  event.waitUntil(
+    clients.matchAll({ type: 'window' })
+      .then((clientList) => {
+        for (const client of clientList) {
+          if (client.url === self.registration.scope && 'focus' in client) {
+            client.focus();
+            return client.postMessage({
+              action: 'notification-click',
+              data: event.notification.data
+            });
+          }
         }
-      }
-      
-      // Если окно не найдено, открываем новое
-      if (clients.openWindow) {
-        return clients.openWindow('/').then(newClient => {
-          // Даем время на загрузку
-          return new Promise(resolve => {
-            setTimeout(() => {
-              if (newClient) {
-                newClient.postMessage({
-                  action: action ? 'notification-action' : 'notification-click',
-                  data: { 
-                    action, 
-                    notification: notification.data,
-                    tag: notification.tag 
-                  }
-                });
-              }
-              resolve();
-            }, 1000);
-          });
-        });
-      }
-    })
+        
+        if (clients.openWindow) {
+          return clients.openWindow('/');
+        }
+      })
   );
 });

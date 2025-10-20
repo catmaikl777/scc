@@ -171,6 +171,26 @@
     preloadMicrophoneAccess();
   }
 
+  async function preloadMicrophoneAccess() {
+    try {
+      // Пробуем получить доступ к микрофону при загрузке страницы
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        } 
+      });
+      
+      // Немедленно освобождаем поток
+      stream.getTracks().forEach(track => track.stop());
+      
+      console.log("✅ Microphone preloaded successfully");
+    } catch (error) {
+      console.log("ℹ️ Microphone preload failed (user hasn't granted permission yet)");
+    }
+  }
+
   function checkBrowserSupport() {
     const issues = [];
 
