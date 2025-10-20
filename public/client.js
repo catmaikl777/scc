@@ -161,6 +161,7 @@
 
   // Инициализация приложения
   function init() {
+    checkBrowserSupport();
     setupEventListeners();
     initializeEmojiPanel();
     initializeVoiceRecording();
@@ -168,6 +169,29 @@
     loadUserName();
     connectWebSocket();
     preloadMicrophoneAccess();
+  }
+
+  function checkBrowserSupport() {
+    const issues = [];
+
+    // Проверка MediaRecorder
+    if (typeof MediaRecorder === "undefined") {
+      issues.push("запись голосовых сообщений");
+    }
+
+    // Проверка getUserMedia
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      issues.push("доступ к микрофону");
+    }
+
+    // Проверка WebAudio API
+    if (!window.AudioContext && !window.webkitAudioContext) {
+      issues.push("воспроизведение аудио");
+    }
+
+    if (issues.length > 0) {
+      showSystemMessage(`⚠️ Ваш браузер не поддерживает: ${issues.join(", ")}`);
+    }
   }
 
   function debugConnectionsDetailed() {
@@ -441,109 +465,122 @@
     try {
       console.log("🎤 Starting voice recording...");
 
-      // Запрашиваем доступ к микрофону с базовыми настройками
-      const stream = await navigator.mediaDevices.getUserMedia({
+      // Проверяем поддержку
+      if (typeof MediaRecorder === "undefined") {
+        showSystemMessage("❌ Ваш браузер не поддерживает запись аудио");
+        return;
+      }
+
+      // Пробуем разные конфигурации для совместимости
+      const constraints = {
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
-          sampleRate: 16000, // Уменьшаем для совместимости
           channelCount: 1,
+          sampleRate: 44100,
+          sampleSize: 16,
         },
-      });
+      };
 
-      // Проверяем наличие аудио треков
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (error) {
+        console.warn("⚠️ Primary constraints failed, trying basic audio...");
+        // Пробуем базовые настройки
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+
       const audioTracks = stream.getAudioTracks();
       if (audioTracks.length === 0) {
         throw new Error("No audio tracks available");
       }
 
-      console.log(
-        "✅ Microphone access granted, audio tracks:",
-        audioTracks.length
-      );
+      console.log("✅ Microphone access granted");
 
-      // Инициализируем AudioContext для визуализации
-      audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      analyser = audioContext.createAnalyser();
-      const source = audioContext.createMediaStreamSource(stream);
-      source.connect(analyser);
-
-      analyser.fftSize = 256;
-      const bufferLength = analyser.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
-
-      // Пробуем разные MIME types для совместимости
+      // Определяем поддерживаемый формат
       const mimeTypes = [
         "audio/webm;codecs=opus",
         "audio/webm",
         "audio/ogg;codecs=opus",
         "audio/mp4",
         "audio/wav",
+        "audio/aac",
       ];
 
       let supportedType = "";
       for (const type of mimeTypes) {
         if (MediaRecorder.isTypeSupported(type)) {
           supportedType = type;
+          console.log("🎵 Using supported format:", type);
           break;
         }
       }
 
       if (!supportedType) {
-        supportedType = "audio/webm"; // Fallback
+        // Используем формат по умолчанию и надеемся на лучшее
+        supportedType = "audio/webm";
+        console.warn("⚠️ No specific format supported, using default");
       }
 
-      console.log("🎵 Using audio format:", supportedType);
-
-      // Настраиваем MediaRecorder
-      mediaRecorder = new MediaRecorder(stream, {
-        mimeType: supportedType,
-      });
+      // Создаем MediaRecorder с обработкой ошибок
+      let mediaRecorder;
+      try {
+        mediaRecorder = new MediaRecorder(stream, {
+          mimeType: supportedType,
+          audioBitsPerSecond: 128000,
+        });
+      } catch (error) {
+        console.warn(
+          "⚠️ MediaRecorder creation failed, trying without mimeType"
+        );
+        mediaRecorder = new MediaRecorder(stream);
+      }
 
       audioChunks = [];
 
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
+        if (event.data && event.data.size > 0) {
           audioChunks.push(event.data);
-          console.log("📦 Audio chunk received:", event.data.size, "bytes");
         }
       };
 
       mediaRecorder.onstop = handleRecordingStop;
-
       mediaRecorder.onerror = (event) => {
         console.error("❌ MediaRecorder error:", event.error);
         showSystemMessage("❌ Ошибка записи");
         cancelVoiceRecording();
       };
 
-      // Запускаем запись с небольшими chunk'ами для надежности
-      mediaRecorder.start(100);
+      // Запускаем запись с разными интервалами для совместимости
+      try {
+        mediaRecorder.start(100);
+      } catch (error) {
+        console.warn("⚠️ Start with timeslice failed, trying without");
+        mediaRecorder.start();
+      }
+
       isRecording = true;
       recordingStartTime = Date.now();
 
       // Обновляем UI
       voiceMessageBtn.classList.add("recording");
       voiceRecordModal.classList.remove("hidden");
-
-      // Запускаем таймер
       startRecordingTimer();
-
-      // Запускаем визуализацию
-      startVisualization(dataArray, bufferLength);
 
       console.log("✅ Voice recording started successfully");
     } catch (error) {
       console.error("❌ Error starting voice recording:", error);
 
-      let errorMessage = "❌ Не удалось получить доступ к микрофону";
+      let errorMessage = "❌ Не удалось начать запись";
+
       if (error.name === "NotAllowedError") {
         errorMessage = "❌ Разрешение на использование микрофона отклонено";
       } else if (error.name === "NotFoundError") {
         errorMessage = "❌ Микрофон не найден";
       } else if (error.name === "NotSupportedError") {
-        errorMessage = "❌ Браузер не поддерживает запись аудио";
+        errorMessage = "❌ Ваш браузер не поддерживает запись аудио";
       }
 
       showSystemMessage(errorMessage);
@@ -670,11 +707,10 @@
   async function handleRecordingStop() {
     try {
       if (audioChunks.length === 0) {
-        showSystemMessage("❌ Запись слишком короткая или отсутствует");
+        showSystemMessage("❌ Запись отсутствует или слишком короткая");
         return;
       }
 
-      const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
       const duration = Math.floor((Date.now() - recordingStartTime) / 1000);
 
       if (duration < 1) {
@@ -687,24 +723,30 @@
         return;
       }
 
-      showSystemMessage("🔄 Отправка голосового сообщения...");
+      showSystemMessage("🔄 Обработка записи...");
+
+      // Создаем Blob из chunks
+      const audioBlob = new Blob(audioChunks, {
+        type: mediaRecorder.mimeType || "audio/webm",
+      });
 
       // Конвертируем в base64
       const reader = new FileReader();
+
       reader.onload = () => {
         const base64 = reader.result.split(",")[1];
 
-        // Определяем расширение файла в зависимости от формата
-        const fileExtension = mediaRecorder.mimeType.includes("ogg")
-          ? "ogg"
-          : mediaRecorder.mimeType.includes("mp4")
-          ? "mp4"
-          : "webm";
+        // Определяем расширение файла
+        let fileExtension = "webm";
+        if (mediaRecorder.mimeType.includes("ogg")) fileExtension = "ogg";
+        if (mediaRecorder.mimeType.includes("mp4")) fileExtension = "mp4";
+        if (mediaRecorder.mimeType.includes("wav")) fileExtension = "wav";
 
+        // Отправляем сообщение
         sendMessage({
           type: "file",
           filename: `voice_${Date.now()}.${fileExtension}`,
-          filetype: mediaRecorder.mimeType,
+          filetype: mediaRecorder.mimeType || "audio/webm",
           size: audioBlob.size,
           data: base64,
           duration: duration,
@@ -723,6 +765,7 @@
       console.error("❌ Error processing recording:", error);
       showSystemMessage("❌ Ошибка обработки записи");
     } finally {
+      // Всегда очищаем chunks
       audioChunks = [];
     }
   }
@@ -789,35 +832,48 @@
   }
 
   function handleVoicePlayback(event) {
-    const button = event.target;
-    const audioData = button.getAttribute("data-audio");
-    const duration = parseInt(button.getAttribute("data-duration"));
+  const button = event.target.closest(".play-pause-btn");
+  if (!button) return;
 
-    if (!audioData) {
-      console.error("❌ No audio data found");
-      return;
+  const audioData = button.getAttribute("data-audio");
+  const duration = parseInt(button.getAttribute("data-duration"));
+
+  if (!audioData) {
+    showSystemMessage("❌ Ошибка воспроизведения: данные отсутствуют");
+    return;
+  }
+
+  try {
+    // Пробуем разные MIME types для совместимости
+    const mimeTypes = [
+      "audio/webm;codecs=opus",
+      "audio/webm", 
+      "audio/ogg;codecs=opus",
+      "audio/mp4",
+      "audio/wav",
+      "audio/mpeg"
+    ];
+
+    let audio;
+    let success = false;
+
+    for (const mimeType of mimeTypes) {
+      try {
+        audio = new Audio(`data:${mimeType};base64,${audioData}`);
+        audio.preload = "auto";
+        success = true;
+        break;
+      } catch (e) {
+        continue;
+      }
     }
 
-    // Определяем MIME type на основе данных
-    const mimeType = audioData.startsWith("Gk")
-      ? "audio/ogg"
-      : audioData.startsWith("Ukl")
-      ? "audio/wav"
-      : "audio/webm";
+    if (!success) {
+      // Последняя попытка без указания MIME type
+      audio = new Audio(`data:audio/webm;base64,${audioData}`);
+    }
 
-    const audio = new Audio(`data:${mimeType};base64,${audioData}`);
-
-    // Настройка аудио для мобильных устройств
-    audio.preload = "auto";
-    audio.volume = 1.0;
-
-    const visualization = button.parentElement.querySelector(
-      ".voice-visualization"
-    );
-    const progressBar = button.parentElement.parentElement.querySelector(
-      ".voice-progress-bar"
-    );
-    const bars = visualization.querySelectorAll(".voice-bar");
+    audio.volume = 0.8;
 
     // Останавливаем все другие воспроизведения
     document.querySelectorAll(".play-pause-btn").forEach((btn) => {
@@ -829,40 +885,35 @@
         } catch (e) {}
         btn.textContent = "▶️";
         btn.removeAttribute("data-audio-instance");
-
-        // Сбрасываем визуализацию для других кнопок
+        
         const otherBars = btn.parentElement.querySelectorAll(".voice-bar");
-        const otherProgress = btn.parentElement.parentElement.querySelector(
-          ".voice-progress-bar"
-        );
+        const otherProgress = btn.parentElement.parentElement.querySelector(".voice-progress-bar");
         resetVisualization(otherBars, otherProgress);
       }
     });
 
     if (button.getAttribute("data-audio-instance")) {
-      // Останавливаем воспроизведение
-      audio.pause();
+      // Останавливаем текущее воспроизведение
+      const currentAudio = button.getAttribute("data-audio-instance");
+      currentAudio.pause();
       button.textContent = "▶️";
       button.removeAttribute("data-audio-instance");
+      
+      const bars = button.parentElement.querySelectorAll(".voice-bar");
+      const progressBar = button.parentElement.parentElement.querySelector(".voice-progress-bar");
       resetVisualization(bars, progressBar);
     } else {
       // Начинаем воспроизведение
       button.textContent = "⏸️";
       button.setAttribute("data-audio-instance", audio);
 
-      audio.addEventListener("loadeddata", () => {
-        console.log("✅ Audio loaded, duration:", audio.duration);
-        startPlaybackVisualization(
-          audio,
-          bars,
-          progressBar,
-          duration || audio.duration
-        );
-      });
+      const visualization = button.parentElement.querySelector(".voice-visualization");
+      const progressBar = button.parentElement.parentElement.querySelector(".voice-progress-bar");
+      const bars = visualization.querySelectorAll(".voice-bar");
 
       audio.addEventListener("timeupdate", () => {
-        const progress = (audio.currentTime / audio.duration) * 100;
-        if (progressBar) {
+        if (audio.duration && progressBar) {
+          const progress = (audio.currentTime / audio.duration) * 100;
           progressBar.style.width = `${progress}%`;
         }
       });
@@ -882,21 +933,44 @@
         button.removeAttribute("data-audio-instance");
         resetVisualization(bars, progressBar);
         showSystemMessage("❌ Ошибка воспроизведения аудио");
+        
+        // Пробуем альтернативный метод
+        setTimeout(() => {
+          try {
+            const altAudio = new Audio(`data:audio/wav;base64,${audioData}`);
+            altAudio.play().catch(() => {});
+          } catch (altError) {
+            console.error("Alternative playback also failed:", altError);
+          }
+        }, 100);
       });
 
-      // Для мобильных устройств - запускаем в контексте пользовательского действия
+      // Запускаем воспроизведение
       const playPromise = audio.play();
-
+      
       if (playPromise !== undefined) {
-        playPromise.catch((error) => {
-          console.error("❌ Audio play failed:", error);
-          button.textContent = "▶️";
-          button.removeAttribute("data-audio-instance");
-          showSystemMessage("❌ Не удалось воспроизвести аудио");
-        });
+        playPromise
+          .then(() => {
+            console.log("✅ Audio playback started");
+            startPlaybackVisualization(audio, bars, progressBar, duration || audio.duration);
+          })
+          .catch((error) => {
+            console.error("❌ Audio play failed:", error);
+            button.textContent = "▶️";
+            button.removeAttribute("data-audio-instance");
+
+            if (error.name === "NotAllowedError") {
+              showSystemMessage("❌ Нажмите на страницу чтобы разрешить воспроизведение");
+            }
+          });
       }
     }
+  } catch (error) {
+    console.error("❌ Error setting up audio playback:", error);
+    showSystemMessage("❌ Ошибка воспроизведения аудио");
   }
+}
+  
 
   function startPlaybackVisualization(audio, bars, progressBar, duration) {
     const updateVisualization = () => {
@@ -1148,34 +1222,36 @@
     }
   }
 
+  // В функции handleInitMessage в client.js
   function handleInitMessage(message) {
     myId = message.id;
     mySessionId = message.sessionId;
 
-    // ПРОВЕРЯЕМ localStorage ПЕРЕД генерацией имени
+    // УБЕРИТЕ авто-генерацию имени - используем только сохраненное
     const savedName = localStorage.getItem("chatUserName");
-    const autoName = savedName || `User${Math.floor(Math.random() * 10000)}`;
 
-    // Сохраняем в localStorage
-    localStorage.setItem("chatUserName", autoName);
+    if (savedName && nameInput) {
+      nameInput.value = savedName;
+      console.log(`✅ Name loaded from storage: ${savedName}`);
 
-    // Устанавливаем в поле ввода
-    if (nameInput) {
-      nameInput.value = autoName;
+      // Отправляем имя на сервер с задержкой для стабильности соединения
+      setTimeout(() => {
+        if (isConnected && ws.readyState === WebSocket.OPEN) {
+          sendMessage({ type: "setName", name: savedName });
+          console.log(`✅ Name sent to server: ${savedName}`);
+        } else {
+          // Если соединение не готово, пробуем позже
+          setTimeout(() => {
+            if (isConnected) {
+              sendMessage({ type: "setName", name: savedName });
+            }
+          }, 1000);
+        }
+      }, 500);
+    } else {
+      // Только если нет сохраненного имени - предлагаем ввести
+      showSystemMessage("⚠️ Установите имя в настройках");
     }
-
-    // Отправляем имя на сервер
-    setTimeout(() => {
-      if (isConnected) {
-        sendMessage({ type: "setName", name: autoName });
-      }
-    }, 500);
-
-    console.log(
-      `✅ Name set: ${autoName} (${
-        savedName ? "from storage" : "auto-generated"
-      })`
-    );
   }
 
   // ДОБАВИТЬ при загрузке страницы
@@ -1238,8 +1314,33 @@
 
   function handleNameChange() {
     const name = nameInput.value.trim();
+
+    if (!name) {
+      showSystemMessage("❌ Имя не может быть пустым");
+      return;
+    }
+
+    if (name.length > 50) {
+      showSystemMessage("❌ Имя слишком длинное (максимум 50 символов)");
+      return;
+    }
+
+    if (!/^[a-zA-Zа-яА-Я0-9_-\s]+$/.test(name)) {
+      showSystemMessage("❌ Имя содержит недопустимые символы");
+      return;
+    }
+
     if (name && isConnected) {
-      sendMessage({ type: "setName", name });
+      // Сохраняем в localStorage ПЕРЕД отправкой на сервер
+      localStorage.setItem("chatUserName", name);
+      console.log(`✅ Name saved to localStorage: ${name}`);
+
+      sendMessage({ type: "setName", name: name });
+
+      // Показываем подтверждение
+      showSystemMessage(`🔄 Отправка имени на сервер...`);
+    } else if (!isConnected) {
+      showSystemMessage("❌ Нет подключения к серверу");
     }
   }
 
