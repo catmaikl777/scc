@@ -1,0 +1,1687 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#dc2626" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <meta name="apple-mobile-web-app-title" content="Огненный Кот" />
+    <link rel="apple-touch-icon" href="/favicon.ico" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <meta name="apple-mobile-web-app-title" content="Огненный Кот" />
+    <link rel="apple-touch-icon" href="/favicon.ico" />
+    <meta name="msapplication-TileColor" content="#dc2626" />
+    <meta name="theme-color" content="#dc2626" />
+    <meta name="mobile-web-app-capable" content="yes" />
+
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-messaging-compat.js"></script>
+
+    <title>ЧАТ ОГНЕННЫЙ КОТ</title>
+    <style>
+      :root {
+        --primary-red: #dc2626;
+        --primary-blue: #2563eb;
+        --primary-dark: #1e293b;
+        --primary-light: #fecaca;
+        --accent-blue: #3b82f6;
+        --accent-red: #ef4444;
+        --bg-primary: #0f172a;
+        --bg-secondary: #1e293b;
+        --bg-tertiary: #334155;
+        --text-primary: #f1f5f9;
+        --text-secondary: #cbd5e1;
+        --text-muted: #94a3b8;
+        --border-color: #475569;
+        --my-message-bg: #dc2626;
+        --other-message-bg: #334155;
+        --gradient-primary: linear-gradient(135deg, #dc2626 0%, #2563eb 100%);
+        --gradient-secondary: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        --shadow-primary: 0 4px 20px rgba(220, 38, 38, 0.3);
+        --shadow-blue: 0 4px 20px rgba(37, 99, 235, 0.3);
+        --vh: 1vh;
+
+        /* WhatsApp-like variables */
+        --wa-green: #dc2626; /* Используем ваш красный вместо зеленого */
+        --wa-chat-bg: #0b141a;
+        --wa-message-out: #dc2626;
+        --wa-message-in: #334155;
+        --wa-input-bg: #1e293b;
+        --wa-header-bg: #1e293b;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      html,
+      body {
+        height: 100%;
+        overflow: hidden;
+        background: var(--wa-chat-bg);
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Oxygen, Ubuntu, Cantarell, sans-serif;
+        background: var(--wa-chat-bg);
+        color: var(--text-primary);
+        line-height: 1.4;
+        touch-action: manipulation;
+      }
+
+      /* Контейнер для частиц */
+      #particles-js {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: -1;
+        opacity: 0.3;
+      }
+
+      #app {
+        display: flex;
+        height: 100vh;
+        height: calc(var(--vh, 1vh) * 100);
+        position: relative;
+        background: transparent;
+      }
+
+      /* WhatsApp-like Header */
+      .chat-header {
+        background: var(--wa-header-bg);
+        padding: 16px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        border-bottom: 1px solid var(--border-color);
+        min-height: 70px;
+        flex-shrink: 0;
+      }
+
+      .chat-avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: var(--gradient-primary);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: bold;
+        font-size: 18px;
+      }
+
+      .chat-info {
+        flex: 1;
+      }
+
+      .chat-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .chat-status {
+        font-size: 13px;
+        color: var(--text-secondary);
+        margin-top: 2px;
+      }
+
+      .header-actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .header-btn {
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        font-size: 20px;
+        padding: 8px;
+        cursor: pointer;
+        border-radius: 50%;
+        transition: background 0.2s;
+      }
+
+      .header-btn:active {
+        background: rgba(255, 255, 255, 0.1);
+      }
+
+      /* Сайдбар WhatsApp-style */
+      #sidebar {
+        width: min(320px, 85vw);
+        background: var(--wa-header-bg);
+        border-right: 1px solid var(--border-color);
+        display: flex;
+        flex-direction: column;
+        transition: transform 0.3s ease;
+        z-index: 100;
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        transform: translateX(-100%);
+        box-shadow: 2px 0 10px rgba(0, 0, 0, 0.3);
+      }
+
+      #sidebar.active {
+        transform: translateX(0);
+      }
+
+      .sidebar-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 16px;
+        background: var(--wa-header-bg);
+        border-bottom: 1px solid var(--border-color);
+        min-height: 70px;
+        flex-shrink: 0;
+      }
+
+      .sidebar-header h1 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--text-primary);
+      }
+
+      .close-sidebar {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 255, 255, 0.1);
+        border: none;
+        font-size: 20px;
+        color: var(--text-primary);
+        cursor: pointer;
+        padding: 8px;
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        transition: all 0.2s;
+      }
+
+      .close-sidebar:active {
+        background: rgba(255, 255, 255, 0.2);
+        transform: scale(0.95);
+      }
+
+      /* Панель пользователя */
+      #userPanel {
+        padding: 16px;
+        background: var(--wa-header-bg);
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+
+      #nameInput {
+        flex: 1;
+        min-width: 0;
+        padding: 12px 16px;
+        border: 1px solid var(--border-color);
+        border-radius: 20px;
+        background: var(--wa-input-bg);
+        color: var(--text-primary);
+        font-size: 16px;
+        outline: none;
+        min-height: 44px;
+        transition: all 0.2s;
+      }
+
+      #nameInput:focus {
+        border-color: var(--primary-blue);
+        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+      }
+
+      #setName {
+        padding: 12px 16px;
+        border: none;
+        background: var(--primary-blue);
+        color: #fff;
+        border-radius: 20px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        min-height: 44px;
+        white-space: nowrap;
+        flex-shrink: 0;
+        transition: all 0.2s;
+      }
+
+      #setName:active {
+        background: #1d4ed8;
+        transform: scale(0.98);
+      }
+
+      #users {
+        overflow: auto;
+        flex: 1;
+        padding: 16px;
+      }
+
+      #users h2 {
+        font-size: 16px;
+        color: var(--text-secondary);
+        margin-bottom: 12px;
+        font-weight: 500;
+      }
+
+      #userList {
+        list-style: none;
+        margin: 0;
+      }
+
+      /* Основной чат WhatsApp-style */
+      #chat {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        background: var(--wa-chat-bg);
+        width: 100%;
+        position: relative;
+      }
+
+      #messages {
+        overflow: auto;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        flex: 1;
+        padding-bottom: 0;
+        background: transparent;
+      }
+
+      /* Сообщения WhatsApp-style */
+      .message {
+        max-width: min(400px, 85%);
+        padding: 8px 12px 4px 12px;
+        border-radius: 8px;
+        background: var(--wa-message-in);
+        position: relative;
+        word-wrap: break-word;
+        margin-bottom: 4px;
+        word-break: break-word;
+        transition: transform 0.2s;
+      }
+
+      .message:hover {
+        transform: translateY(-1px);
+      }
+
+      .message.me {
+        margin-left: auto;
+        background: var(--wa-message-out);
+        border-bottom-right-radius: 4px;
+      }
+
+      .message:not(.me) {
+        border-bottom-left-radius: 4px;
+      }
+
+      .message-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2px;
+        gap: 8px;
+      }
+
+      .message-header strong {
+        font-size: 13px;
+        color: var(--primary-blue);
+        font-weight: 500;
+        flex-shrink: 0;
+      }
+
+      .message.me .message-header strong {
+        color: rgba(255, 255, 255, 0.9);
+      }
+
+      .message-text {
+        font-size: 15px;
+        line-height: 1.4;
+        margin-bottom: 4px;
+      }
+
+      .message-time {
+        font-size: 11px;
+        color: var(--text-muted);
+        opacity: 0.8;
+        flex-shrink: 0;
+      }
+
+      /* Форма сообщения WhatsApp-style */
+      #messageForm {
+        display: flex;
+        gap: 8px;
+        padding: 16px;
+        background: var(--wa-input-bg);
+        border-top: 1px solid var(--border-color);
+        align-items: center;
+        flex-shrink: 0;
+        position: relative;
+        min-height: 80px;
+      }
+
+      #messageInput {
+        flex: 1;
+        min-width: 0;
+        padding: 12px 16px;
+        border: 1px solid var(--border-color);
+        border-radius: 20px;
+        background: var(--wa-input-bg);
+        color: var(--text-primary);
+        font-size: 16px;
+        outline: none;
+        min-height: 44px;
+        resize: none;
+        transition: all 0.2s;
+      }
+
+      #messageInput:focus {
+        border-color: var(--primary-blue);
+        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+      }
+
+      #messageInput::placeholder {
+        color: var(--text-muted);
+      }
+
+      #messageForm button[type="submit"] {
+        padding: 12px;
+        border: none;
+        background: var(--wa-message-out);
+        color: white;
+        border-radius: 50%;
+        cursor: pointer;
+        width: 44px;
+        height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        font-size: 16px;
+        transition: all 0.2s;
+      }
+
+      #messageForm button[type="submit"]:active {
+        transform: scale(0.95);
+      }
+
+      /* Кнопка загрузки файлов */
+      #fileUploadBtn {
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        padding: 12px;
+        border-radius: 50%;
+        cursor: pointer;
+        width: 44px;
+        height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        font-size: 20px;
+        transition: all 0.2s;
+      }
+
+      #fileUploadBtn:active {
+        background: rgba(255, 255, 255, 0.1);
+        transform: scale(0.95);
+      }
+
+      /* Кнопка голосовых сообщений */
+      #voiceMessageBtn {
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        padding: 12px;
+        border-radius: 50%;
+        cursor: pointer;
+        width: 44px;
+        height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        font-size: 20px;
+        transition: all 0.2s;
+      }
+
+      #voiceMessageBtn:active {
+        background: rgba(255, 255, 255, 0.1);
+        transform: scale(0.95);
+      }
+
+      #voiceMessageBtn.recording {
+        background: var(--primary-red);
+        color: white;
+        animation: pulse 1.5s infinite;
+      }
+
+      /* Эмодзи панель */
+      .emoji-panel {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        padding: 8px;
+        background: var(--wa-input-bg);
+        border-bottom: 1px solid var(--border-color);
+        max-height: 120px;
+        overflow-y: auto;
+        flex-shrink: 0;
+      }
+
+      .emoji-panel button {
+        font-size: 20px;
+        padding: 8px 12px;
+        border: none;
+        background: transparent;
+        border-radius: 8px;
+        cursor: pointer;
+        flex: 1;
+        min-width: 44px;
+        min-height: 44px;
+        transition: all 0.2s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .emoji-panel button:active {
+        background: rgba(255, 255, 255, 0.1);
+        transform: scale(0.95);
+      }
+
+      /* Мобильные стили */
+      .sidebar-toggle {
+        display: none;
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        z-index: 99;
+        background: var(--wa-message-out);
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 44px;
+        height: 44px;
+        font-size: 18px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .sidebar-toggle:active {
+        transform: scale(0.95);
+      }
+
+      .overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.7);
+        z-index: 90;
+      }
+
+      .overlay.active {
+        display: block;
+      }
+
+      /* Стили для списка пользователей WhatsApp-style */
+      .user-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 16px;
+        border-radius: 8px;
+        margin-bottom: 4px;
+        background: transparent;
+        cursor: pointer;
+        transition: all 0.2s;
+        min-height: 44px;
+      }
+
+      .user-item:hover {
+        background: rgba(255, 255, 255, 0.05);
+      }
+
+      .user-item:active {
+        background: rgba(255, 255, 255, 0.1);
+        transform: scale(0.98);
+      }
+
+      .user-status {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--primary-red);
+        flex-shrink: 0;
+      }
+
+      .user-status.online {
+        background: #10b981;
+      }
+
+      .user-name {
+        flex: 1;
+        font-size: 14px;
+        font-weight: 500;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .you-badge {
+        font-size: 12px;
+        color: var(--text-muted);
+        flex-shrink: 0;
+      }
+
+      #onlineCount {
+        font-size: 14px;
+        color: var(--text-muted);
+        margin: 12px 0;
+        text-align: left;
+        font-weight: 500;
+      }
+
+      .system {
+        text-align: center;
+        color: var(--text-muted);
+        font-size: 13px;
+        margin: 8px 0;
+        font-style: italic;
+        padding: 0 8px;
+      }
+
+      .action {
+        color: var(--primary-red);
+        font-style: italic;
+        margin: 8px 0;
+        text-align: center;
+        font-size: 13px;
+        padding: 0 8px;
+      }
+
+      .reaction {
+        color: var(--primary-blue);
+        margin: 8px 0;
+        text-align: center;
+        font-size: 13px;
+        padding: 0 8px;
+      }
+
+      .private {
+        background: var(--wa-message-in);
+        border-radius: 8px;
+        padding: 12px;
+        margin: 8px 0;
+        border-left: 3px solid var(--primary-blue);
+        max-width: min(400px, 90%);
+        margin-left: auto;
+      }
+
+      /* Кнопки звонков */
+      #callControls {
+        padding: 16px;
+        border-top: 1px solid var(--border-color);
+        flex-shrink: 0;
+      }
+
+      .call-btn {
+        width: 100%;
+        padding: 14px;
+        background: var(--wa-message-out);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 16px;
+        font-weight: 500;
+        margin-bottom: 8px;
+        min-height: 50px;
+        transition: all 0.2s;
+      }
+
+      .call-btn:active:not(:disabled) {
+        transform: scale(0.98);
+      }
+
+      .call-btn:disabled {
+        background: var(--text-muted);
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      .call-btn.end {
+        background: var(--primary-red);
+      }
+
+      /* Остальные стили остаются такими же, но с адаптацией под новую цветовую схему */
+
+      /* ВИДЕОЗВОНКИ */
+      .video-call-container {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: var(--wa-chat-bg);
+        z-index: 1000;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .video-call-container.hidden {
+        display: none;
+      }
+
+      .video-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 16px;
+        background: var(--wa-header-bg);
+        border-bottom: 1px solid var(--border-color);
+        min-height: 60px;
+        flex-shrink: 0;
+      }
+
+      .video-header h3 {
+        margin: 0;
+        color: var(--text-primary);
+        font-size: 18px;
+        font-weight: 600;
+      }
+
+      .video-controls {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .video-controls button {
+        background: var(--wa-input-bg);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        padding: 10px;
+        border-radius: 8px;
+        cursor: pointer;
+        min-width: 44px;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        transition: all 0.2s;
+      }
+
+      .video-controls button:active {
+        background: var(--primary-blue);
+        transform: scale(0.95);
+      }
+
+      /* КВАДРАТНАЯ СЕТКА */
+      .video-grid {
+        flex: 1;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: 1fr;
+        gap: 8px;
+        padding: 8px;
+        min-height: 0;
+        aspect-ratio: 2 / 1;
+      }
+
+      .video-container {
+        position: relative;
+        background: var(--wa-header-bg);
+        border-radius: 12px;
+        overflow: hidden;
+        min-height: 0;
+        aspect-ratio: 1 / 1;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      }
+
+      .video-container video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        background: var(--wa-input-bg);
+      }
+
+      .video-label {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 4px 8px;
+        border-radius: 6px;
+        font-size: 12px;
+        z-index: 1;
+      }
+
+      .call-info {
+        padding: 16px;
+        text-align: center;
+        background: var(--wa-header-bg);
+        border-top: 1px solid var(--border-color);
+        flex-shrink: 0;
+      }
+
+      .call-info p {
+        margin: 4px 0;
+        color: var(--text-secondary);
+        font-size: 14px;
+      }
+
+      /* Модальные окна */
+      .modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(11, 20, 26, 0.95);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 2000;
+        padding: 20px;
+      }
+
+      .modal.hidden {
+        display: none;
+      }
+
+      .modal-content {
+        background: var(--wa-header-bg);
+        padding: 24px;
+        border-radius: 16px;
+        text-align: center;
+        width: min(400px, 90vw);
+        max-width: 100%;
+        border: 1px solid var(--border-color);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+      }
+
+      .modal-content h3 {
+        margin-bottom: 12px;
+        color: var(--text-primary);
+        font-size: 20px;
+        font-weight: 600;
+      }
+
+      .modal-content p {
+        color: var(--text-secondary);
+        margin-bottom: 20px;
+      }
+
+      .modal-buttons {
+        display: flex;
+        gap: 12px;
+        margin-top: 20px;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+
+      .modal-buttons button {
+        padding: 14px 20px;
+        border: none;
+        border-radius: 20px;
+        cursor: pointer;
+        font-size: 16px;
+        font-weight: 500;
+        min-height: 50px;
+        flex: 1;
+        min-width: 120px;
+        transition: all 0.2s;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      }
+
+      .modal-buttons button:active {
+        transform: scale(0.95);
+      }
+
+      .accept-btn {
+        background: var(--primary-blue);
+        color: white;
+      }
+
+      .accept-btn:active {
+        background: #1d4ed8;
+      }
+
+      .reject-btn {
+        background: var(--primary-red);
+        color: white;
+      }
+
+      .reject-btn:active {
+        background: #b91c1c;
+      }
+
+      /* Стили для файлов */
+      .file-message {
+        max-width: min(400px, 90%);
+        margin: 8px 0;
+      }
+
+      .file-preview {
+        border-radius: 8px;
+        overflow: hidden;
+        background: var(--wa-input-bg);
+        border: 1px solid var(--border-color);
+        margin-top: 8px;
+      }
+
+      .file-preview img,
+      .file-preview video {
+        width: 100%;
+        max-height: min(300px, 40vh);
+        object-fit: contain;
+        display: block;
+      }
+
+      .file-info {
+        padding: 12px;
+        background: var(--wa-header-bg);
+      }
+
+      .file-name {
+        font-weight: 500;
+        margin-bottom: 4px;
+        word-break: break-all;
+        color: var(--text-primary);
+      }
+
+      .file-size {
+        color: var(--text-muted);
+        font-size: 12px;
+        margin-bottom: 8px;
+      }
+
+      .download-btn {
+        display: inline-block;
+        padding: 8px 16px;
+        background: var(--primary-blue);
+        color: white;
+        text-decoration: none;
+        border-radius: 6px;
+        font-size: 14px;
+        min-height: 36px;
+        border: none;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .download-btn:active {
+        background: #1d4ed8;
+        transform: scale(0.95);
+      }
+
+      .file-icon {
+        text-align: center;
+        padding: 20px;
+        font-size: 48px;
+        background: var(--wa-input-bg);
+        border-radius: 8px;
+        color: var(--text-secondary);
+      }
+
+      /* Кнопка звонка у пользователя */
+      .call-user-btn {
+        background: var(--primary-blue);
+        border: none;
+        color: white;
+        padding: 8px;
+        border-radius: 50%;
+        cursor: pointer;
+        font-size: 14px;
+        width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-left: auto;
+        flex-shrink: 0;
+        transition: all 0.2s;
+      }
+
+      .call-user-btn:active {
+        background: #1d4ed8;
+        transform: scale(0.95);
+      }
+
+      /* Анимации */
+      @keyframes pulse {
+        0% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+        100% {
+          opacity: 1;
+        }
+      }
+
+      .connecting {
+        animation: pulse 2s infinite;
+      }
+
+      @keyframes pulse-ring {
+        0% {
+          transform: scale(0.8);
+          opacity: 1;
+        }
+        80%,
+        100% {
+          transform: scale(2);
+          opacity: 0;
+        }
+      }
+
+      .incoming-call-pulse {
+        animation: pulse-ring 2s infinite;
+      }
+
+      /* Скроллбар */
+      ::-webkit-scrollbar {
+        width: 6px;
+      }
+
+      ::-webkit-scrollbar-track {
+        background: var(--wa-chat-bg);
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background: var(--primary-blue);
+        border-radius: 3px;
+      }
+
+      ::-webkit-scrollbar-thumb:hover {
+        background: var(--primary-red);
+      }
+
+      /* Предотвращение выделения текста */
+      .message,
+      .user-item,
+      button {
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
+      }
+
+      /* Улучшения для доступности */
+      button:focus-visible {
+        outline: 2px solid var(--primary-blue);
+        outline-offset: 2px;
+      }
+
+      input:focus-visible {
+        outline: 2px solid var(--primary-blue);
+        outline-offset: 2px;
+      }
+
+      /* Стили для голосовых сообщений */
+      .voice-message {
+        max-width: min(400px, 90%);
+        margin: 8px 0;
+      }
+
+      .voice-player {
+        background: var(--wa-input-bg);
+        border-radius: 8px;
+        padding: 12px;
+        margin-top: 8px;
+        border: 1px solid var(--border-color);
+      }
+
+      .voice-controls {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 8px;
+      }
+
+      .play-pause-btn {
+        background: var(--primary-blue);
+        border: none;
+        color: white;
+        padding: 8px;
+        border-radius: 50%;
+        cursor: pointer;
+        width: 36px;
+        height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        transition: all 0.2s;
+      }
+
+      .play-pause-btn:active {
+        background: #1d4ed8;
+        transform: scale(0.95);
+      }
+
+      .voice-visualization {
+        flex: 1;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        padding: 0 8px;
+      }
+
+      .voice-bar {
+        flex: 1;
+        background: var(--primary-blue);
+        border-radius: 2px;
+        transition: height 0.1s ease;
+        min-height: 2px;
+      }
+
+      .voice-duration {
+        font-size: 12px;
+        color: var(--text-muted);
+        min-width: 40px;
+        text-align: center;
+      }
+
+      .voice-progress {
+        width: 100%;
+        height: 4px;
+        background: var(--wa-header-bg);
+        border-radius: 2px;
+        overflow: hidden;
+        margin-top: 4px;
+      }
+
+      .voice-progress-bar {
+        height: 100%;
+        background: var(--primary-blue);
+        border-radius: 2px;
+        transition: width 0.1s ease;
+        width: 0%;
+      }
+
+      /* Модальное окно записи голоса */
+      .voice-record-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(11, 20, 26, 0.95);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 2000;
+        padding: 20px;
+      }
+
+      .voice-record-modal.hidden {
+        display: none;
+      }
+
+      .voice-record-content {
+        background: var(--wa-header-bg);
+        padding: 24px;
+        border-radius: 16px;
+        text-align: center;
+        width: min(320px, 90vw);
+        max-width: 100%;
+        border: 1px solid var(--border-color);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+      }
+
+      .voice-record-visualization {
+        height: 80px;
+        display: flex;
+        align-items: end;
+        justify-content: center;
+        gap: 3px;
+        margin: 20px 0;
+        padding: 0 20px;
+      }
+
+      .voice-record-bar {
+        width: 6px;
+        background: var(--primary-red);
+        border-radius: 3px;
+        transition: height 0.1s ease;
+        min-height: 2px;
+      }
+
+      .voice-record-timer {
+        font-size: 24px;
+        font-weight: bold;
+        color: var(--text-primary);
+        margin: 16px 0;
+      }
+
+      .voice-record-controls {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+        margin-top: 20px;
+      }
+
+      .voice-record-controls button {
+        padding: 12px 20px;
+        border: none;
+        border-radius: 20px;
+        cursor: pointer;
+        font-size: 16px;
+        font-weight: 500;
+        min-height: 44px;
+        min-width: 100px;
+        transition: all 0.2s;
+      }
+
+      .stop-record-btn {
+        background: var(--primary-red);
+        color: white;
+      }
+
+      .stop-record-btn:active {
+        background: #b91c1c;
+        transform: scale(0.95);
+      }
+
+      .cancel-record-btn {
+        background: var(--wa-input-bg);
+        color: var(--text-primary);
+      }
+
+      .cancel-record-btn:active {
+        background: var(--border-color);
+        transform: scale(0.95);
+      }
+
+      .quick-join-call {
+        background: rgba(59, 130, 246, 0.1) !important;
+        border: 1px solid var(--primary-blue) !important;
+        border-radius: 8px !important;
+        padding: 8px 12px !important;
+        margin: 8px 0 !important;
+      }
+
+      .quick-join-call button {
+        transition: all 0.2s;
+      }
+
+      .quick-join-call button:active {
+        transform: scale(0.95);
+      }
+
+      .join-call-item {
+        background: rgba(245, 158, 11, 0.1) !important;
+        border: 1px solid #f59e0b !important;
+      }
+
+      .join-call-item:hover {
+        background: rgba(245, 158, 11, 0.2) !important;
+      }
+
+      /* Адаптивность */
+      @media (max-width: 768px) {
+        .sidebar-toggle {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .message {
+          max-width: 90%;
+        }
+
+        #messageForm {
+          padding: 12px;
+          gap: 6px;
+        }
+
+        #messageInput {
+          padding: 10px 14px;
+          font-size: 16px;
+        }
+
+        .emoji-panel {
+          padding: 6px;
+          gap: 3px;
+        }
+
+        .emoji-panel button {
+          font-size: 18px;
+          padding: 6px 10px;
+          min-width: 40px;
+          min-height: 40px;
+        }
+
+        .chat-header {
+          padding: 12px;
+        }
+
+        .video-grid {
+          grid-template-columns: 1fr;
+          grid-template-rows: 1fr 1fr;
+          aspect-ratio: 1 / 2;
+        }
+
+        .video-container {
+          aspect-ratio: 1 / 1;
+        }
+
+        .modal-buttons {
+          flex-direction: column;
+        }
+
+        .modal-buttons button {
+          flex: none;
+          width: 100%;
+        }
+
+        .voice-record-controls {
+          flex-direction: column;
+        }
+
+        .voice-record-controls button {
+          width: 100%;
+        }
+      }
+
+      @media (max-width: 480px) {
+        #sidebar {
+          width: 100vw;
+        }
+
+        .message {
+          max-width: 95%;
+        }
+
+        .video-grid {
+          padding: 4px;
+          gap: 4px;
+        }
+
+        .video-header {
+          padding: 12px;
+        }
+
+        .video-controls {
+          gap: 4px;
+        }
+
+        .video-controls button {
+          padding: 8px;
+          min-width: 40px;
+          min-height: 40px;
+        }
+      }
+
+      /* Оверлей для мобильного меню */
+      @media (max-width: 768px) {
+        #sidebar {
+          width: min(320px, 85vw);
+        }
+
+        .overlay {
+          display: none;
+        }
+
+        .overlay.active {
+          display: block;
+        }
+      }
+
+      /* Высота для мобильных браузеров */
+      @media (max-height: 600px) {
+        .chat-header,
+        .sidebar-header {
+          min-height: 60px;
+          padding: 12px;
+        }
+
+        #userPanel {
+          padding: 12px;
+        }
+
+        #messageForm {
+          min-height: 70px;
+        }
+
+        #messageInput {
+          min-height: 40px;
+        }
+
+        #messageForm button[type="submit"],
+        #fileUploadBtn,
+        #voiceMessageBtn {
+          width: 40px;
+          height: 40px;
+        }
+      }
+
+      /* Поддержка PWA */
+      @media (display-mode: standalone) {
+        body {
+          -webkit-overflow-scrolling: touch;
+        }
+
+        #app {
+          height: 100vh;
+          height: calc(var(--vh, 1vh) * 100);
+        }
+
+        .chat-header {
+          padding-top: env(safe-area-inset-top);
+          padding-left: calc(16px + env(safe-area-inset-left));
+          padding-right: calc(16px + env(safe-area-inset-right));
+        }
+
+        #messageForm {
+          padding-bottom: calc(16px + env(safe-area-inset-bottom));
+          padding-left: calc(16px + env(safe-area-inset-left));
+          padding-right: calc(16px + env(safe-area-inset-right));
+        }
+      }
+
+      /* Улучшенная поддержка безопасных зон */
+      @supports (padding: max(0px)) {
+        .chat-header {
+          padding-left: max(16px, env(safe-area-inset-left));
+          padding-right: max(16px, env(safe-area-inset-right));
+          padding-top: max(16px, env(safe-area-inset-top));
+        }
+
+        #messageForm {
+          padding-left: max(16px, env(safe-area-inset-left));
+          padding-right: max(16px, env(safe-area-inset-right));
+          padding-bottom: max(16px, env(safe-area-inset-bottom));
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="particles-js"></div>
+
+    <div id="app">
+      <!-- Кнопка открытия сайдбара для мобильных -->
+      <button class="sidebar-toggle" onclick="toggleSidebar()">☰</button>
+      <div class="overlay" onclick="toggleSidebar()"></div>
+
+      <!-- Сайдбар -->
+      <div id="sidebar">
+        <div class="sidebar-header">
+          <h1>Участники</h1>
+          <button class="close-sidebar" onclick="toggleSidebar()">✕</button>
+        </div>
+
+        <div id="userPanel">
+          <input
+            type="text"
+            id="nameInput"
+            placeholder="Ваше имя"
+            maxlength="20"
+          />
+          <button id="setName">Сохранить</button>
+        </div>
+
+        <div id="users">
+          <h2>Сейчас онлайн</h2>
+          <div id="onlineCount">0 участников</div>
+          <ul id="userList"></ul>
+        </div>
+
+        <div id="callControls">
+          <button class="call-btn" onclick="startVideoCall()" id="startCallBtn">
+            📹 Начать видеозвонок
+          </button>
+          <button
+            class="call-btn end"
+            onclick="endVideoCall()"
+            id="endCallBtn"
+            disabled
+          >
+            📞 Завершить звонок
+          </button>
+        </div>
+      </div>
+
+      <!-- Основной чат -->
+      <div id="chat">
+        <div class="chat-header">
+          <div class="chat-avatar">🔥</div>
+          <div class="chat-info">
+            <div class="chat-title">Огненный Кот Чат</div>
+            <div class="chat-status" id="onlineStatus">
+              <span id="onlineCountHeader">0 участников онлайн</span>
+            </div>
+          </div>
+          <div class="header-actions">
+            <button class="header-btn" onclick="toggleEmojiPanel()">😊</button>
+            <button class="header-btn" onclick="toggleSidebar()">👥</button>
+          </div>
+        </div>
+
+        <div id="messages"></div>
+
+        <!-- Панель эмодзи -->
+        <div class="emoji-panel" id="emojiPanel" style="display: none">
+          <!-- Emojis will be inserted here by JavaScript -->
+        </div>
+
+        <!-- Форма отправки сообщения -->
+        <form id="messageForm">
+          <button
+            type="button"
+            id="voiceMessageBtn"
+            onclick="toggleVoiceRecord()"
+          >
+            🎤
+          </button>
+          <textarea
+            id="messageInput"
+            placeholder="Введите сообщение..."
+            maxlength="1000"
+            rows="1"
+          ></textarea>
+          <button type="button" id="fileUploadBtn" onclick="uploadFile()">
+            📎
+          </button>
+          <button type="submit">➤</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Модальное окно записи голоса -->
+    <div class="voice-record-modal hidden" id="voiceRecordModal">
+      <div class="voice-record-content">
+        <h3>Запись голосового сообщения</h3>
+        <div class="voice-record-visualization" id="voiceRecordVisualization">
+          <!-- Voice bars will be inserted here -->
+        </div>
+        <div class="voice-record-timer" id="voiceRecordTimer">00:00</div>
+        <div class="voice-record-controls">
+          <button class="stop-record-btn" onclick="stopVoiceRecording()">
+            Остановить
+          </button>
+          <button class="cancel-record-btn" onclick="cancelVoiceRecording()">
+            Отмена
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Контейнер для видеозвонка -->
+    <div class="video-call-container hidden" id="videoCallContainer">
+      <div class="video-header">
+        <h3>Видеозвонок</h3>
+        <div class="video-controls">
+          <button onclick="toggleVideo()" id="toggleVideoBtn">📹</button>
+          <button onclick="toggleAudio()" id="toggleAudioBtn">🎤</button>
+          <button onclick="toggleScreenShare()" id="toggleScreenBtn">🖥️</button>
+          <button
+            onclick="endVideoCall()"
+            style="background: var(--primary-red)"
+          >
+            📞
+          </button>
+        </div>
+      </div>
+
+      <div class="video-grid">
+        <div class="video-container">
+          <video id="localVideo" autoplay muted playsinline></video>
+          <div class="video-label">Вы</div>
+        </div>
+        <div class="video-container">
+          <video id="remoteVideo" autoplay playsinline></video>
+          <div class="video-label">Собеседник</div>
+        </div>
+      </div>
+
+      <div class="call-info">
+        <p id="callStatus">Подключение...</p>
+        <p id="callTimer">00:00</p>
+      </div>
+    </div>
+
+    <!-- Модальное окно входящего звонка -->
+    <div class="modal hidden" id="incomingCallModal">
+      <div class="modal-content">
+        <h3>Входящий видеозвонок</h3>
+        <p id="callerName">Пользователь звонит вам</p>
+        <div class="modal-buttons">
+          <button class="accept-btn" onclick="acceptVideoCall()">
+            Принять
+          </button>
+          <button class="reject-btn" onclick="rejectVideoCall()">
+            Отклонить
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Подключение библиотеки частиц -->
+    <script src="https://cdn.jsdelivr.net/particles.js/2.0.0/particles.min.js"></script>
+
+    <script>
+      // Глобальные функции для работы с файлами
+      window.downloadFile = function (filename, filetype, base64Data) {
+        const link = document.createElement("a");
+        link.href = `data:${filetype};base64,${base64Data}`;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      };
+
+      // Инициализация частиц
+      particlesJS("particles-js", {
+        particles: {
+          number: { value: 80, density: { enable: true, value_area: 800 } },
+          color: { value: ["#ff0000", "#0066ff", "#ff9900"] },
+          shape: { type: "circle" },
+          opacity: { value: 0.5, random: true },
+          size: { value: 3, random: true },
+          line_linked: {
+            enable: true,
+            distance: 150,
+            color: "#ffffff",
+            opacity: 0.4,
+            width: 1,
+          },
+          move: {
+            enable: true,
+            speed: 2,
+            direction: "none",
+            random: true,
+            straight: false,
+            out_mode: "out",
+            bounce: false,
+          },
+        },
+        interactivity: {
+          detect_on: "canvas",
+          events: {
+            onhover: { enable: true, mode: "repulse" },
+            onclick: { enable: true, mode: "push" },
+          },
+        },
+        retina_detect: true,
+      });
+    </script>
+
+    <script>
+      // Регистрация Service Worker
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", function () {
+          navigator.serviceWorker
+            .register("/sw.js")
+            .then(function (registration) {
+              console.log("ServiceWorker зарегистрирован: ", registration);
+            })
+            .catch(function (error) {
+              console.log("Ошибка регистрации ServiceWorker: ", error);
+            });
+        });
+      }
+
+      // Обработчик сообщений от Service Worker
+      navigator.serviceWorker.addEventListener("message", (event) => {
+        const { action, data } = event.data;
+
+        switch (action) {
+          case "notification-click":
+            // Фокусируем окно
+            window.focus();
+            break;
+          case "notification-action":
+            // Обрабатываем действия из уведомлений
+            handleNotificationAction(data);
+            break;
+        }
+      });
+
+      function handleNotificationAction(data) {
+        // Эта функция будет переопределена в client.js
+        if (window.handleNotificationAction) {
+          window.handleNotificationAction(data);
+        }
+      }
+    </script>
+
+    <script src="client.js"></script>
+  </body>
+</html>
