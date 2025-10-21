@@ -174,20 +174,32 @@
   async function preloadMicrophoneAccess() {
     try {
       // Пробуем получить доступ к микрофону при загрузке страницы
-      const stream = await navigator.mediaDevices.getUserMedia({ 
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true
-        } 
+          autoGainControl: true,
+        },
       });
-      
+
       // Немедленно освобождаем поток
-      stream.getTracks().forEach(track => track.stop());
-      
+      stream.getTracks().forEach((track) => track.stop());
+
       console.log("✅ Microphone preloaded successfully");
     } catch (error) {
-      console.log("ℹ️ Microphone preload failed (user hasn't granted permission yet)");
+      console.log(
+        "ℹ️ Microphone preload failed (user hasn't granted permission yet)"
+      );
+    }
+  }
+
+  function toggleSidebar() {
+    const sidebar = document.getElementById("sidebar");
+    const overlay = document.querySelector(".overlay");
+
+    if (sidebar && overlay) {
+      sidebar.classList.toggle("active");
+      overlay.classList.toggle("active");
     }
   }
 
@@ -283,6 +295,27 @@
         showSystemMessage("❌ Ошибка доступа к микрофону");
       }
     });
+
+    const sidebarToggle = document.getElementById("sidebarToggle");
+    const mobileSidebarToggle = document.getElementById("mobileSidebarToggle");
+    const closeSidebar = document.getElementById("closeSidebar");
+    const overlay = document.getElementById("overlay");
+
+    if (sidebarToggle) {
+      sidebarToggle.addEventListener("click", toggleSidebar);
+    }
+
+    if (mobileSidebarToggle) {
+      mobileSidebarToggle.addEventListener("click", toggleSidebar);
+    }
+
+    if (closeSidebar) {
+      closeSidebar.addEventListener("click", toggleSidebar);
+    }
+
+    if (overlay) {
+      overlay.addEventListener("click", toggleSidebar);
+    }
 
     // Звонки
     startCallBtn.addEventListener("click", startGroupCall);
