@@ -171,6 +171,28 @@
     preloadMicrophoneAccess();
   }
 
+  async function preloadMicrophoneAccess() {
+    try {
+      // Пробуем получить доступ к микрофону при загрузке страницы
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+
+      // Немедленно освобождаем поток
+      stream.getTracks().forEach((track) => track.stop());
+
+      console.log("✅ Microphone preloaded successfully");
+    } catch (error) {
+      console.log(
+        "ℹ️ Microphone preload failed (user hasn't granted permission yet)"
+      );
+    }
+  }
+
   function checkBrowserSupport() {
     const issues = [];
 
@@ -263,6 +285,27 @@
         showSystemMessage("❌ Ошибка доступа к микрофону");
       }
     });
+
+    const sidebarToggle = document.getElementById("sidebarToggle");
+    const mobileSidebarToggle = document.getElementById("mobileSidebarToggle");
+    const closeSidebar = document.getElementById("closeSidebar");
+    const overlay = document.getElementById("overlay");
+
+    if (sidebarToggle) {
+      sidebarToggle.addEventListener("click", toggleSidebar);
+    }
+
+    if (mobileSidebarToggle) {
+      mobileSidebarToggle.addEventListener("click", toggleSidebar);
+    }
+
+    if (closeSidebar) {
+      closeSidebar.addEventListener("click", toggleSidebar);
+    }
+
+    if (overlay) {
+      overlay.addEventListener("click", toggleSidebar);
+    }
 
     // Звонки
     startCallBtn.addEventListener("click", startGroupCall);
@@ -832,145 +875,159 @@
   }
 
   function handleVoicePlayback(event) {
-  const button = event.target.closest(".play-pause-btn");
-  if (!button) return;
+    const button = event.target.closest(".play-pause-btn");
+    if (!button) return;
 
-  const audioData = button.getAttribute("data-audio");
-  const duration = parseInt(button.getAttribute("data-duration"));
+    const audioData = button.getAttribute("data-audio");
+    const duration = parseInt(button.getAttribute("data-duration"));
 
-  if (!audioData) {
-    showSystemMessage("❌ Ошибка воспроизведения: данные отсутствуют");
-    return;
-  }
-
-  try {
-    // Пробуем разные MIME types для совместимости
-    const mimeTypes = [
-      "audio/webm;codecs=opus",
-      "audio/webm", 
-      "audio/ogg;codecs=opus",
-      "audio/mp4",
-      "audio/wav",
-      "audio/mpeg"
-    ];
-
-    let audio;
-    let success = false;
-
-    for (const mimeType of mimeTypes) {
-      try {
-        audio = new Audio(`data:${mimeType};base64,${audioData}`);
-        audio.preload = "auto";
-        success = true;
-        break;
-      } catch (e) {
-        continue;
-      }
+    if (!audioData) {
+      showSystemMessage("❌ Ошибка воспроизведения: данные отсутствуют");
+      return;
     }
 
-    if (!success) {
-      // Последняя попытка без указания MIME type
-      audio = new Audio(`data:audio/webm;base64,${audioData}`);
-    }
+    try {
+      // Пробуем разные MIME types для совместимости
+      const mimeTypes = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/ogg;codecs=opus",
+        "audio/mp4",
+        "audio/wav",
+        "audio/mpeg",
+      ];
 
-    audio.volume = 0.8;
+      let audio;
+      let success = false;
 
-    // Останавливаем все другие воспроизведения
-    document.querySelectorAll(".play-pause-btn").forEach((btn) => {
-      if (btn !== button && btn.getAttribute("data-audio-instance")) {
-        const otherAudio = btn.getAttribute("data-audio-instance");
+      for (const mimeType of mimeTypes) {
         try {
-          otherAudio.pause();
-          otherAudio.currentTime = 0;
-        } catch (e) {}
-        btn.textContent = "▶️";
-        btn.removeAttribute("data-audio-instance");
-        
-        const otherBars = btn.parentElement.querySelectorAll(".voice-bar");
-        const otherProgress = btn.parentElement.parentElement.querySelector(".voice-progress-bar");
-        resetVisualization(otherBars, otherProgress);
+          audio = new Audio(`data:${mimeType};base64,${audioData}`);
+          audio.preload = "auto";
+          success = true;
+          break;
+        } catch (e) {
+          continue;
+        }
       }
-    });
 
-    if (button.getAttribute("data-audio-instance")) {
-      // Останавливаем текущее воспроизведение
-      const currentAudio = button.getAttribute("data-audio-instance");
-      currentAudio.pause();
-      button.textContent = "▶️";
-      button.removeAttribute("data-audio-instance");
-      
-      const bars = button.parentElement.querySelectorAll(".voice-bar");
-      const progressBar = button.parentElement.parentElement.querySelector(".voice-progress-bar");
-      resetVisualization(bars, progressBar);
-    } else {
-      // Начинаем воспроизведение
-      button.textContent = "⏸️";
-      button.setAttribute("data-audio-instance", audio);
+      if (!success) {
+        // Последняя попытка без указания MIME type
+        audio = new Audio(`data:audio/webm;base64,${audioData}`);
+      }
 
-      const visualization = button.parentElement.querySelector(".voice-visualization");
-      const progressBar = button.parentElement.parentElement.querySelector(".voice-progress-bar");
-      const bars = visualization.querySelectorAll(".voice-bar");
+      audio.volume = 0.8;
 
-      audio.addEventListener("timeupdate", () => {
-        if (audio.duration && progressBar) {
-          const progress = (audio.currentTime / audio.duration) * 100;
-          progressBar.style.width = `${progress}%`;
-        }
-      });
-
-      audio.addEventListener("ended", () => {
-        button.textContent = "▶️";
-        button.removeAttribute("data-audio-instance");
-        resetVisualization(bars, progressBar);
-        if (progressBar) {
-          progressBar.style.width = "0%";
-        }
-      });
-
-      audio.addEventListener("error", (e) => {
-        console.error("❌ Audio playback error:", e);
-        button.textContent = "▶️";
-        button.removeAttribute("data-audio-instance");
-        resetVisualization(bars, progressBar);
-        showSystemMessage("❌ Ошибка воспроизведения аудио");
-        
-        // Пробуем альтернативный метод
-        setTimeout(() => {
+      // Останавливаем все другие воспроизведения
+      document.querySelectorAll(".play-pause-btn").forEach((btn) => {
+        if (btn !== button && btn.getAttribute("data-audio-instance")) {
+          const otherAudio = btn.getAttribute("data-audio-instance");
           try {
-            const altAudio = new Audio(`data:audio/wav;base64,${audioData}`);
-            altAudio.play().catch(() => {});
-          } catch (altError) {
-            console.error("Alternative playback also failed:", altError);
-          }
-        }, 100);
+            otherAudio.pause();
+            otherAudio.currentTime = 0;
+          } catch (e) {}
+          btn.textContent = "▶️";
+          btn.removeAttribute("data-audio-instance");
+
+          const otherBars = btn.parentElement.querySelectorAll(".voice-bar");
+          const otherProgress = btn.parentElement.parentElement.querySelector(
+            ".voice-progress-bar"
+          );
+          resetVisualization(otherBars, otherProgress);
+        }
       });
 
-      // Запускаем воспроизведение
-      const playPromise = audio.play();
-      
-      if (playPromise !== undefined) {
-        playPromise
-          .then(() => {
-            console.log("✅ Audio playback started");
-            startPlaybackVisualization(audio, bars, progressBar, duration || audio.duration);
-          })
-          .catch((error) => {
-            console.error("❌ Audio play failed:", error);
-            button.textContent = "▶️";
-            button.removeAttribute("data-audio-instance");
+      if (button.getAttribute("data-audio-instance")) {
+        // Останавливаем текущее воспроизведение
+        const currentAudio = button.getAttribute("data-audio-instance");
+        currentAudio.pause();
+        button.textContent = "▶️";
+        button.removeAttribute("data-audio-instance");
 
-            if (error.name === "NotAllowedError") {
-              showSystemMessage("❌ Нажмите на страницу чтобы разрешить воспроизведение");
+        const bars = button.parentElement.querySelectorAll(".voice-bar");
+        const progressBar = button.parentElement.parentElement.querySelector(
+          ".voice-progress-bar"
+        );
+        resetVisualization(bars, progressBar);
+      } else {
+        // Начинаем воспроизведение
+        button.textContent = "⏸️";
+        button.setAttribute("data-audio-instance", audio);
+
+        const visualization = button.parentElement.querySelector(
+          ".voice-visualization"
+        );
+        const progressBar = button.parentElement.parentElement.querySelector(
+          ".voice-progress-bar"
+        );
+        const bars = visualization.querySelectorAll(".voice-bar");
+
+        audio.addEventListener("timeupdate", () => {
+          if (audio.duration && progressBar) {
+            const progress = (audio.currentTime / audio.duration) * 100;
+            progressBar.style.width = `${progress}%`;
+          }
+        });
+
+        audio.addEventListener("ended", () => {
+          button.textContent = "▶️";
+          button.removeAttribute("data-audio-instance");
+          resetVisualization(bars, progressBar);
+          if (progressBar) {
+            progressBar.style.width = "0%";
+          }
+        });
+
+        audio.addEventListener("error", (e) => {
+          console.error("❌ Audio playback error:", e);
+          button.textContent = "▶️";
+          button.removeAttribute("data-audio-instance");
+          resetVisualization(bars, progressBar);
+          showSystemMessage("❌ Ошибка воспроизведения аудио");
+
+          // Пробуем альтернативный метод
+          setTimeout(() => {
+            try {
+              const altAudio = new Audio(`data:audio/wav;base64,${audioData}`);
+              altAudio.play().catch(() => {});
+            } catch (altError) {
+              console.error("Alternative playback also failed:", altError);
             }
-          });
+          }, 100);
+        });
+
+        // Запускаем воспроизведение
+        const playPromise = audio.play();
+
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              console.log("✅ Audio playback started");
+              startPlaybackVisualization(
+                audio,
+                bars,
+                progressBar,
+                duration || audio.duration
+              );
+            })
+            .catch((error) => {
+              console.error("❌ Audio play failed:", error);
+              button.textContent = "▶️";
+              button.removeAttribute("data-audio-instance");
+
+              if (error.name === "NotAllowedError") {
+                showSystemMessage(
+                  "❌ Нажмите на страницу чтобы разрешить воспроизведение"
+                );
+              }
+            });
+        }
       }
+    } catch (error) {
+      console.error("❌ Error setting up audio playback:", error);
+      showSystemMessage("❌ Ошибка воспроизведения аудио");
     }
-  } catch (error) {
-    console.error("❌ Error setting up audio playback:", error);
-    showSystemMessage("❌ Ошибка воспроизведения аудио");
   }
-}
-  
 
   function startPlaybackVisualization(audio, bars, progressBar, duration) {
     const updateVisualization = () => {
@@ -1224,10 +1281,9 @@
 
   // В функции handleInitMessage в client.js
   function handleInitMessage(message) {
-    myId = message.id;
     mySessionId = message.sessionId;
 
-    // УБЕРИТЕ авто-генерацию имени - используем только сохраненное
+    // ЗАГРУЖАЕМ сохраненное имя из localStorage
     const savedName = localStorage.getItem("chatUserName");
 
     if (savedName && nameInput) {
@@ -1245,12 +1301,12 @@
             if (isConnected) {
               sendMessage({ type: "setName", name: savedName });
             }
-          }, 1000);
+          }, 2000);
         }
-      }, 500);
+      }, 1000);
     } else {
-      // Только если нет сохраненного имени - предлагаем ввести
-      showSystemMessage("⚠️ Установите имя в настройках");
+      // Если нет сохраненного имени - предлагаем ввести
+      showSystemMessage("⚠️ Пожалуйста, установите имя в настройках");
     }
   }
 
@@ -2255,15 +2311,10 @@
     offerInProgress.add(targetSessionId);
 
     try {
-      // ПРОСТАЯ ЛОГИКА: всегда пересоздаем соединение для надежности
+      // Закрываем существующее соединение перед созданием нового
       const existingPc = peerConnections.get(targetSessionId);
       if (existingPc) {
-        // Сохраняем только работающие соединения
-        if (existingPc.connectionState === "connected") {
-          console.log(`✅ Already connected to ${targetSessionId}`);
-          return;
-        }
-        // Закрываем проблемные соединения
+        console.log(`🔄 Closing existing connection for ${targetSessionId}`);
         existingPc.close();
         peerConnections.delete(targetSessionId);
       }
@@ -2423,51 +2474,97 @@
       pc.createdAt = Date.now();
       pc.pendingIceCandidates = [];
 
+      // ПРОВЕРЯЕМ, были ли уже добавлены треки в это соединение
+      let audioTracksAdded = false;
+      let videoTracksAdded = false;
+
       // ГАРАНТИРУЕМ наличие локальных треков перед созданием предложения
       if (localStream) {
-        // Явно добавляем все аудио треки
+        // Явно добавляем все аудио треки (только если еще не добавлены)
         const audioTracks = localStream.getAudioTracks();
-        if (audioTracks.length > 0) {
+        if (audioTracks.length > 0 && !audioTracksAdded) {
           audioTracks.forEach((track) => {
             try {
-              console.log(`🎤 Adding audio track to ${targetSessionId}:`, {
-                enabled: track.enabled,
-                readyState: track.readyState,
-                kind: track.kind,
-              });
-              pc.addTrack(track, localStream);
+              // ПРОВЕРЯЕМ, не был ли трек уже добавлен
+              const existingSenders = pc.getSenders();
+              const trackAlreadyAdded = existingSenders.some(
+                (sender) => sender.track && sender.track.id === track.id
+              );
+
+              if (!trackAlreadyAdded) {
+                console.log(`🎤 Adding audio track to ${targetSessionId}:`, {
+                  enabled: track.enabled,
+                  readyState: track.readyState,
+                  kind: track.kind,
+                });
+                pc.addTrack(track, localStream);
+              } else {
+                console.log(
+                  `🎤 Audio track already added to ${targetSessionId}`
+                );
+              }
             } catch (error) {
               console.error("Error adding audio track:", error);
             }
           });
-        } else {
+          audioTracksAdded = true;
+        } else if (audioTracks.length === 0) {
           console.warn("⚠️ No audio tracks available for local stream");
           // Создаем приемник для аудио если нет локального трека
-          pc.addTransceiver("audio", { direction: "recvonly" });
+          if (
+            !pc.getReceivers().some((r) => r.track && r.track.kind === "audio")
+          ) {
+            pc.addTransceiver("audio", { direction: "recvonly" });
+          }
         }
 
-        // Добавляем видео треки если есть
+        // Добавляем видео треки если есть (только если еще не добавлены)
         const videoTracks = localStream.getVideoTracks();
-        if (videoTracks.length > 0) {
+        if (videoTracks.length > 0 && !videoTracksAdded) {
           videoTracks.forEach((track) => {
             try {
-              console.log(`🎥 Adding video track to ${targetSessionId}`);
-              pc.addTrack(track, localStream);
+              // ПРОВЕРЯЕМ, не был ли трек уже добавлен
+              const existingSenders = pc.getSenders();
+              const trackAlreadyAdded = existingSenders.some(
+                (sender) => sender.track && sender.track.id === track.id
+              );
+
+              if (!trackAlreadyAdded) {
+                console.log(`🎥 Adding video track to ${targetSessionId}`);
+                pc.addTrack(track, localStream);
+              } else {
+                console.log(
+                  `🎥 Video track already added to ${targetSessionId}`
+                );
+              }
             } catch (error) {
               console.error("Error adding video track:", error);
             }
           });
-        } else {
+          videoTracksAdded = true;
+        } else if (videoTracks.length === 0) {
           // Создаем приемник для видео если нет локального трека
-          pc.addTransceiver("video", { direction: "recvonly" });
+          if (
+            !pc.getReceivers().some((r) => r.track && r.track.kind === "video")
+          ) {
+            pc.addTransceiver("video", { direction: "recvonly" });
+          }
         }
       } else {
         console.warn(
           "⚠️ No local stream available, creating recvonly transceivers"
         );
         // Если нет локального потока, создаем приемники
-        pc.addTransceiver("audio", { direction: "recvonly" });
-        pc.addTransceiver("video", { direction: "recvonly" });
+        if (
+          !pc.getReceivers().some((r) => r.track && r.track.kind === "audio")
+        ) {
+          pc.addTransceiver("audio", { direction: "recvonly" });
+        }
+        if (
+          !pc.getReceivers().some((r) => r.track && r.track.kind === "video")
+        ) {
+          pc.addTransceiver("video", { direction: "recvonly" });
+        }
       }
 
       // Обработчик получения удаленных потоков
@@ -2608,27 +2705,6 @@
           processPendingIceCandidates(pc, targetSessionId);
         }
       };
-
-      // Добавляем локальные треки
-      if (localStream) {
-        localStream.getAudioTracks().forEach((track) => {
-          try {
-            pc.addTrack(track, localStream);
-            console.log(`🎤 Added audio track to ${targetSessionId}`);
-          } catch (error) {
-            console.error("Error adding audio track:", error);
-          }
-        });
-
-        localStream.getVideoTracks().forEach((track) => {
-          try {
-            pc.addTrack(track, localStream);
-            console.log(`🎥 Added video track to ${targetSessionId}`);
-          } catch (error) {
-            console.error("Error adding video track:", error);
-          }
-        });
-      }
 
       peerConnections.set(targetSessionId, pc);
       return pc;
@@ -3362,6 +3438,102 @@
       }, index * 3000); // 3 секунды между каждым
     });
   }
+
+  // Глобальные функции для HTML onclick
+  window.toggleSidebar = function () {
+    const sidebar = document.getElementById("sidebar");
+    const overlay = document.querySelector(".overlay");
+
+    if (sidebar && overlay) {
+      sidebar.classList.toggle("active");
+      overlay.classList.toggle("active");
+    }
+  };
+
+  window.toggleEmojiPanel = function () {
+    const emojiPanel = document.getElementById("emojiPanel");
+    if (emojiPanel) {
+      emojiPanel.style.display =
+        emojiPanel.style.display === "none" ? "flex" : "none";
+    }
+  };
+
+  window.toggleVoiceRecord = async function () {
+    try {
+      // Сначала проверяем доступ
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (stream) {
+        // Если доступ есть, начинаем запись
+        if (window.startVoiceRecording) {
+          window.startVoiceRecording();
+        }
+      } else {
+        showSystemMessage("❌ Не удалось получить доступ к микрофону");
+      }
+    } catch (error) {
+      showSystemMessage("❌ Ошибка доступа к микрофону");
+    }
+  };
+
+  window.uploadFile = function () {
+    const fileInput = document.getElementById("fileInput");
+    if (fileInput) {
+      fileInput.click();
+    }
+  };
+
+  window.startVideoCall = function () {
+    if (window.startGroupCall) {
+      window.startGroupCall();
+    }
+  };
+
+  window.endVideoCall = function () {
+    if (window.endCall) {
+      window.endCall();
+    }
+  };
+
+  window.acceptVideoCall = function () {
+    if (window.acceptCall) {
+      window.acceptCall();
+    }
+  };
+
+  window.rejectVideoCall = function () {
+    if (window.rejectCall) {
+      window.rejectCall();
+    }
+  };
+
+  window.toggleVideo = function () {
+    if (window.toggleVideo) {
+      window.toggleVideo();
+    }
+  };
+
+  window.toggleAudio = function () {
+    if (window.toggleAudio) {
+      window.toggleAudio();
+    }
+  };
+
+  window.toggleScreenShare = function () {
+    // Функция для демонстрации экрана (можно реализовать позже)
+    showSystemMessage("🖥️ Демонстрация экрана пока не реализована");
+  };
+
+  window.stopVoiceRecording = function () {
+    if (window.stopVoiceRecording) {
+      window.stopVoiceRecording();
+    }
+  };
+
+  window.cancelVoiceRecording = function () {
+    if (window.cancelVoiceRecording) {
+      window.cancelVoiceRecording();
+    }
+  };
 
   // Инициализация при загрузке
   window.addEventListener("DOMContentLoaded", () => {
