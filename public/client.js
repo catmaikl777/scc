@@ -1078,59 +1078,50 @@
   // WebSocket соединение
   function connectWebSocket() {
     const wsUrl = getWebSocketUrl();
+    console.log("🔄 Attempting WebSocket connection to:", wsUrl);
 
     try {
       ws = new WebSocket(wsUrl);
-      setupWebSocketHandlers();
+      console.log("✅ WebSocket object created");
+
+      // Добавляем все обработчики ДО установки соединения
+      ws.onopen = function (event) {
+        console.log("✅ WebSocket onopen triggered!", event);
+        console.log("✅ WebSocket readyState:", ws.readyState);
+        isConnected = true;
+        reconnectAttempts = 0;
+
+        // Тестируем showSystemMessage напрямую
+        console.log("🔄 Testing showSystemMessage...");
+        showSystemMessage("✅ Подключено к серверу");
+        console.log("✅ showSystemMessage called");
+      };
+
+      ws.onmessage = function (event) {
+        console.log("📨 WebSocket onmessage triggered!");
+        console.log("Raw data:", event.data);
+
+        try {
+          const message = JSON.parse(event.data);
+          console.log("✅ Parsed message:", message);
+          handleWebSocketMessage(message);
+        } catch (error) {
+          console.error("❌ Parse error:", error);
+        }
+      };
+
+      ws.onerror = function (error) {
+        console.error("❌ WebSocket onerror:", error);
+        console.error("❌ Error event:", error);
+      };
+
+      ws.onclose = function (event) {
+        console.log("🔌 WebSocket onclose:", event.code, event.reason);
+        isConnected = false;
+      };
     } catch (error) {
-      console.error("Error creating WebSocket:", error);
-      handleConnectionError();
+      console.error("❌ Error creating WebSocket:", error);
     }
-  }
-
-  function setupWebSocketHandlers() {
-    ws.onopen = () => {
-      console.log("✅ Connected to server");
-      isConnected = true;
-      reconnectAttempts = 0;
-      showSystemMessage("✅ Подключено к серверу");
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        handleWebSocketMessage(message);
-      } catch (error) {
-        console.error("Error parsing message:", error);
-      }
-    };
-
-    ws.onerror = (error) => {
-      console.error("WebSocket error:", error);
-      showSystemMessage("❌ Ошибка соединения с сервером");
-    };
-
-    ws.onclose = (event) => {
-      console.log("❌ Disconnected from server:", event.code, event.reason);
-      isConnected = false;
-
-      if (
-        event.code === 4000 &&
-        event.reason === "Duplicate session closed by new connection"
-      ) {
-        console.log(
-          "🔄 Duplicate session closed normally, no reconnection needed"
-        );
-        showSystemMessage(
-          "🔄 Сессия закрыта (вы подключены с другого устройства/вкладки)"
-        );
-        return;
-      }
-
-      if (event.code !== 1000 && event.code !== 4000) {
-        handleReconnection();
-      }
-    };
   }
 
   function handleReconnection() {
