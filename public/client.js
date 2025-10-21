@@ -193,16 +193,6 @@
     }
   }
 
-  function toggleSidebar() {
-    const sidebar = document.getElementById("sidebar");
-    const overlay = document.querySelector(".overlay");
-
-    if (sidebar && overlay) {
-      sidebar.classList.toggle("active");
-      overlay.classList.toggle("active");
-    }
-  }
-
   function checkBrowserSupport() {
     const issues = [];
 
@@ -1082,11 +1072,7 @@
   }
 
   function getWebSocketUrl() {
-    // Для продакшена - ваш backend сервер
-    if (window.location.hostname.includes("vercel.app")) {
-      return "wss://aqqqqqq-2.onrender.com"; // Замените на ваш сервер
-    }
-    return "ws://localhost:3000";
+    return "wss://aqqqqqq-2.onrender.com";
   }
 
   // WebSocket соединение
@@ -3448,6 +3434,102 @@
       }, index * 3000); // 3 секунды между каждым
     });
   }
+
+  // Глобальные функции для HTML onclick
+  window.toggleSidebar = function () {
+    const sidebar = document.getElementById("sidebar");
+    const overlay = document.querySelector(".overlay");
+
+    if (sidebar && overlay) {
+      sidebar.classList.toggle("active");
+      overlay.classList.toggle("active");
+    }
+  };
+
+  window.toggleEmojiPanel = function () {
+    const emojiPanel = document.getElementById("emojiPanel");
+    if (emojiPanel) {
+      emojiPanel.style.display =
+        emojiPanel.style.display === "none" ? "flex" : "none";
+    }
+  };
+
+  window.toggleVoiceRecord = async function () {
+    try {
+      // Сначала проверяем доступ
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (stream) {
+        // Если доступ есть, начинаем запись
+        if (window.startVoiceRecording) {
+          window.startVoiceRecording();
+        }
+      } else {
+        showSystemMessage("❌ Не удалось получить доступ к микрофону");
+      }
+    } catch (error) {
+      showSystemMessage("❌ Ошибка доступа к микрофону");
+    }
+  };
+
+  window.uploadFile = function () {
+    const fileInput = document.getElementById("fileInput");
+    if (fileInput) {
+      fileInput.click();
+    }
+  };
+
+  window.startVideoCall = function () {
+    if (window.startGroupCall) {
+      window.startGroupCall();
+    }
+  };
+
+  window.endVideoCall = function () {
+    if (window.endCall) {
+      window.endCall();
+    }
+  };
+
+  window.acceptVideoCall = function () {
+    if (window.acceptCall) {
+      window.acceptCall();
+    }
+  };
+
+  window.rejectVideoCall = function () {
+    if (window.rejectCall) {
+      window.rejectCall();
+    }
+  };
+
+  window.toggleVideo = function () {
+    if (window.toggleVideo) {
+      window.toggleVideo();
+    }
+  };
+
+  window.toggleAudio = function () {
+    if (window.toggleAudio) {
+      window.toggleAudio();
+    }
+  };
+
+  window.toggleScreenShare = function () {
+    // Функция для демонстрации экрана (можно реализовать позже)
+    showSystemMessage("🖥️ Демонстрация экрана пока не реализована");
+  };
+
+  window.stopVoiceRecording = function () {
+    if (window.stopVoiceRecording) {
+      window.stopVoiceRecording();
+    }
+  };
+
+  window.cancelVoiceRecording = function () {
+    if (window.cancelVoiceRecording) {
+      window.cancelVoiceRecording();
+    }
+  };
 
   // Инициализация при загрузке
   window.addEventListener("DOMContentLoaded", () => {
