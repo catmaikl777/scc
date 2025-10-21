@@ -1072,11 +1072,7 @@
   }
 
   function getWebSocketUrl() {
-    // Для продакшена - ваш backend сервер
-    if (window.location.hostname.includes("vercel.app")) {
-      return "wss://aqqqqqq-2.onrender.com"; // Замените на ваш сервер
-    }
-    return "ws://localhost:3000";
+    return "wss://aqqqqqq-2.onrender.com";
   }
 
   // WebSocket соединение
