@@ -1,0 +1,19 @@
+{
+  "name": "fire-cat-chat",
+  "version": "1.2.0",
+  "description": "WebSocket чат с видеозвонками и push-уведомлениями",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "build": "echo \"No build step\""
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "pg": "^8.11.3",
+    "firebase-admin": "^12.0.0",
+    "web-push": "^3.6.7"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

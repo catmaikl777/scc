@@ -1,0 +1,1072 @@
+/* styles.css - КРАСНО-СИНЯЯ ТЕМА */
+:root {
+  --primary-red: #dc2626;
+  --primary-blue: #2563eb;
+  --primary-dark: #1e293b;
+  --primary-light: #fecaca;
+  --accent-blue: #3b82f6;
+  --accent-red: #ef4444;
+  --bg-primary: #0f172a;
+  --bg-secondary: #1e293b;
+  --bg-tertiary: #334155;
+  --text-primary: #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --border-color: #475569;
+  --my-message-bg: #dc2626;
+  --other-message-bg: #334155;
+  --gradient-primary: linear-gradient(135deg, #dc2626 0%, #2563eb 100%);
+  --gradient-secondary: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  --shadow-primary: 0 4px 20px rgba(220, 38, 38, 0.3);
+  --shadow-blue: 0 4px 20px rgba(37, 99, 235, 0.3);
+  --vh: 1vh;
+}
+
+* { 
+  box-sizing: border-box; 
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body { 
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; 
+  background: var(--bg-primary); 
+  color: var(--text-primary); 
+  line-height: 1.4;
+  touch-action: manipulation;
+}
+
+#app { 
+  display: flex; 
+  height: 100vh; 
+  height: calc(var(--vh, 1vh) * 100);
+  position: relative;
+  background: var(--gradient-secondary);
+}
+
+/* Сайдбар */
+#sidebar { 
+  width: min(320px, 85vw); 
+  background: var(--bg-secondary); 
+  border-right: 1px solid var(--border-color); 
+  display: flex; 
+  flex-direction: column;
+  transition: transform 0.3s ease;
+  z-index: 100;
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  transform: translateX(-100%);
+  box-shadow: 2px 0 10px rgba(0, 0, 0, 0.3);
+}
+
+#sidebar.active {
+  transform: translateX(0);
+}
+
+.sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  background: var(--gradient-primary);
+  border-bottom: 1px solid var(--border-color);
+  min-height: 60px;
+  flex-shrink: 0;
+}
+
+.sidebar-header h1 { 
+  margin: 0; 
+  font-size: 18px;
+  font-weight: 700;
+  color: white;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.close-sidebar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  font-size: 20px;
+  color: white;
+  cursor: pointer;
+  padding: 8px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  transition: all 0.2s;
+}
+
+.close-sidebar:active {
+  background: rgba(255, 255, 255, 0.3);
+  transform: scale(0.95);
+}
+
+/* Панель пользователя */
+#userPanel { 
+  padding: 16px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+  display: flex; 
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+#nameInput {
+  flex: 1;
+  min-width: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 16px;
+  outline: none;
+  min-height: 44px;
+  transition: all 0.2s;
+}
+
+#nameInput:focus {
+  border-color: var(--primary-blue);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
+#setName {
+  padding: 12px 16px;
+  border: none;
+  background: var(--primary-blue);
+  color: #fff;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  min-height: 44px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+#setName:active {
+  background: #1d4ed8;
+  transform: scale(0.98);
+}
+
+#users { 
+  overflow: auto; 
+  flex: 1;
+  padding: 16px;
+}
+
+#users h2 {
+  font-size: 16px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  font-weight: 500;
+}
+
+#userList { 
+  list-style: none; 
+  margin: 0;
+}
+
+/* Основной чат */
+#chat { 
+  flex: 1; 
+  display: flex; 
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg-primary);
+  width: 100%;
+  position: relative;
+}
+
+#messages { 
+  overflow: auto; 
+  padding: 16px; 
+  display: flex; 
+  flex-direction: column; 
+  gap: 8px;
+  flex: 1;
+  padding-bottom: 0;
+  background: var(--bg-primary);
+}
+
+/* Сообщения */
+.message { 
+  max-width: min(400px, 85%); 
+  padding: 8px 12px 4px 12px; 
+  border-radius: 12px; 
+  background: var(--other-message-bg);
+  position: relative;
+  word-wrap: break-word;
+  margin-bottom: 4px;
+  word-break: break-word;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s;
+}
+
+.message:hover {
+  transform: translateY(-1px);
+}
+
+.message.me { 
+  margin-left: auto; 
+  background: var(--gradient-primary);
+  box-shadow: var(--shadow-primary);
+}
+
+.message-header { 
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center; 
+  margin-bottom: 2px; 
+  gap: 8px;
+}
+
+.message-header strong {
+  font-size: 13px;
+  color: var(--primary-blue);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.message.me .message-header strong {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.message-text {
+  font-size: 15px;
+  line-height: 1.4;
+  margin-bottom: 4px;
+}
+
+.message-time {
+  font-size: 11px; 
+  color: var(--text-muted);
+  opacity: 0.8;
+  flex-shrink: 0;
+}
+
+/* Форма сообщения */
+#messageForm { 
+  display: flex; 
+  gap: 8px; 
+  padding: 16px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  align-items: center;
+  flex-shrink: 0;
+  position: relative;
+  min-height: 80px;
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+}
+
+#messageInput {
+  flex: 1;
+  min-width: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 16px;
+  outline: none;
+  min-height: 44px;
+  resize: none;
+  transition: all 0.2s;
+}
+
+#messageInput:focus {
+  border-color: var(--primary-blue);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
+#messageInput::placeholder {
+  color: var(--text-muted);
+}
+
+#messageForm button[type="submit"] { 
+  padding: 12px; 
+  border: none; 
+  background: var(--gradient-primary); 
+  color: white; 
+  border-radius: 50%; 
+  cursor: pointer;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 16px;
+  transition: all 0.2s;
+  box-shadow: var(--shadow-primary);
+}
+
+#messageForm button[type="submit"]:active {
+  transform: scale(0.95);
+}
+
+/* Кнопка загрузки файлов */
+#fileUploadBtn {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 12px;
+  border-radius: 50%;
+  cursor: pointer;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 16px;
+  transition: all 0.2s;
+}
+
+#fileUploadBtn:active {
+  background: var(--primary-blue);
+  transform: scale(0.95);
+}
+
+/* Эмодзи панель */
+.emoji-panel { 
+  display: flex; 
+  flex-wrap: wrap;
+  gap: 4px; 
+  padding: 8px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  max-height: 120px;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.emoji-panel button { 
+  font-size: 20px; 
+  padding: 8px 12px; 
+  border: none; 
+  background: var(--bg-tertiary); 
+  border-radius: 8px; 
+  cursor: pointer;
+  flex: 1;
+  min-width: 44px;
+  min-height: 44px;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.emoji-panel button:active {
+  background: var(--primary-red);
+  transform: scale(0.95);
+}
+
+/* Мобильные стили */
+.sidebar-toggle {
+  display: none;
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 99;
+  background: var(--gradient-primary);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  font-size: 18px;
+  cursor: pointer;
+  box-shadow: var(--shadow-primary);
+  transition: all 0.2s;
+}
+
+.sidebar-toggle:active {
+  transform: scale(0.95);
+}
+
+.overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 90;
+}
+
+.overlay.active {
+  display: block;
+}
+
+/* Стили для списка пользователей */
+.user-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  margin-bottom: 4px;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+  min-height: 44px;
+}
+
+.user-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.user-item:active {
+  background: var(--border-color);
+  transform: scale(0.98);
+}
+
+.user-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--primary-red);
+  flex-shrink: 0;
+  box-shadow: 0 0 6px var(--primary-red);
+}
+
+.user-status.online {
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+}
+
+.user-name {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.you-badge {
+  font-size: 12px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+#onlineCount {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin: 12px 0;
+  text-align: left;
+  font-weight: 500;
+}
+
+.system { 
+  text-align: center; 
+  color: var(--text-muted); 
+  font-size: 13px;
+  margin: 8px 0;
+  font-style: italic;
+  padding: 0 8px;
+}
+
+.action {
+  color: var(--primary-red); 
+  font-style: italic; 
+  margin: 8px 0;
+  text-align: center;
+  font-size: 13px;
+  padding: 0 8px;
+}
+
+.reaction { 
+  color: var(--primary-blue); 
+  margin: 8px 0;
+  text-align: center;
+  font-size: 13px;
+  padding: 0 8px;
+}
+
+.private { 
+  background: var(--bg-tertiary); 
+  border-radius: 12px; 
+  padding: 12px; 
+  margin: 8px 0;
+  border-left: 3px solid var(--primary-blue);
+  max-width: min(400px, 90%);
+  margin-left: auto;
+  box-shadow: var(--shadow-blue);
+}
+
+/* Кнопки звонков */
+#callControls {
+  padding: 16px;
+  border-top: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.call-btn {
+  width: 100%;
+  padding: 14px;
+  background: var(--gradient-primary);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 500;
+  margin-bottom: 8px;
+  min-height: 50px;
+  transition: all 0.2s;
+  box-shadow: var(--shadow-primary);
+}
+
+.call-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.call-btn:disabled {
+  background: var(--text-muted);
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.call-btn.end {
+  background: var(--gradient-primary);
+}
+
+/* ВИДЕОЗВОНКИ */
+.video-call-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--bg-primary);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+}
+
+.video-call-container.hidden {
+  display: none;
+}
+
+.video-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  background: var(--gradient-primary);
+  border-bottom: 1px solid var(--border-color);
+  min-height: 60px;
+  flex-shrink: 0;
+}
+
+.video-header h3 {
+  margin: 0;
+  color: white;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.video-controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.video-controls button {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  transition: all 0.2s;
+}
+
+.video-controls button:active {
+  background: var(--primary-blue);
+  transform: scale(0.95);
+}
+
+/* КВАДРАТНАЯ СЕТКА */
+.video-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr;
+  gap: 8px;
+  padding: 8px;
+  min-height: 0;
+  aspect-ratio: 2 / 1;
+}
+
+.video-container {
+  position: relative;
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  overflow: hidden;
+  min-height: 0;
+  aspect-ratio: 1 / 1;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.video-container video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: var(--bg-tertiary);
+}
+
+.video-label {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  z-index: 1;
+}
+
+.call-info {
+  padding: 16px;
+  text-align: center;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.call-info p {
+  margin: 4px 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+/* Модальные окна */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(15, 23, 42, 0.95);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 20px;
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modal-content {
+  background: var(--bg-secondary);
+  padding: 24px;
+  border-radius: 16px;
+  text-align: center;
+  width: min(400px, 90vw);
+  max-width: 100%;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+
+.modal-content h3 {
+  margin-bottom: 12px;
+  color: var(--text-primary);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.modal-content p {
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+}
+
+.modal-buttons {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.modal-buttons button {
+  padding: 14px 20px;
+  border: none;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 500;
+  min-height: 50px;
+  flex: 1;
+  min-width: 120px;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.modal-buttons button:active {
+  transform: scale(0.95);
+}
+
+.accept-btn {
+  background: var(--primary-blue);
+  color: white;
+}
+
+.accept-btn:active {
+  background: #1d4ed8;
+}
+
+.reject-btn {
+  background: var(--primary-red);
+  color: white;
+}
+
+.reject-btn:active {
+  background: #b91c1c;
+}
+
+/* Стили для файлов */
+.file-message {
+  max-width: min(400px, 90%);
+  margin: 8px 0;
+}
+
+.file-preview {
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  margin-top: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.file-preview img,
+.file-preview video {
+  width: 100%;
+  max-height: min(300px, 40vh);
+  object-fit: contain;
+  display: block;
+}
+
+.file-info {
+  padding: 12px;
+  background: var(--bg-secondary);
+}
+
+.file-name {
+  font-weight: 500;
+  margin-bottom: 4px;
+  word-break: break-all;
+  color: var(--text-primary);
+}
+
+.file-size {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.download-btn {
+  display: inline-block;
+  padding: 8px 16px;
+  background: var(--primary-blue);
+  color: white;
+  text-decoration: none;
+  border-radius: 6px;
+  font-size: 14px;
+  min-height: 36px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.download-btn:active {
+  background: #1d4ed8;
+  transform: scale(0.95);
+}
+
+.file-icon {
+  text-align: center;
+  padding: 20px;
+  font-size: 48px;
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+  color: var(--text-secondary);
+}
+
+/* Кнопка звонка у пользователя */
+.call-user-btn {
+  background: var(--primary-blue);
+  border: none;
+  color: white;
+  padding: 8px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 14px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  flex-shrink: 0;
+  transition: all 0.2s;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);
+}
+
+.call-user-btn:active {
+  background: #1d4ed8;
+  transform: scale(0.95);
+}
+
+/* Анимации */
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.5; }
+  100% { opacity: 1; }
+}
+
+.connecting {
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.8); opacity: 1; }
+  80%, 100% { transform: scale(2); opacity: 0; }
+}
+
+.incoming-call-pulse {
+  animation: pulse-ring 2s infinite;
+}
+
+/* Скроллбар */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--primary-blue);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--primary-red);
+}
+
+/* Предотвращение выделения текста */
+.message, .user-item, button {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+
+/* Улучшения для доступности */
+button:focus-visible {
+  outline: 2px solid var(--primary-blue);
+  outline-offset: 2px;
+}
+
+input:focus-visible {
+  outline: 2px solid var(--primary-blue);
+  outline-offset: 2px;
+}
+
+/* Адаптивность */
+@media (max-width: 768px) {
+  .sidebar-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  .message {
+    max-width: 90%;
+  }
+  
+  #messageForm {
+    padding: 12px;
+    gap: 6px;
+  }
+  
+  #messageInput {
+    padding: 10px 14px;
+    font-size: 16px;
+  }
+  
+  .emoji-panel {
+    padding: 6px;
+    gap: 3px;
+  }
+  
+  .emoji-panel button {
+    min-width: 40px;
+    min-height: 40px;
+    padding: 6px 8px;
+    font-size: 18px;
+  }
+  
+  .video-grid {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr;
+    gap: 4px;
+    padding: 4px;
+  }
+  
+  .video-controls {
+    justify-content: center;
+  }
+  
+  .video-controls button {
+    min-width: 40px;
+    min-height: 40px;
+    padding: 8px;
+  }
+}
+
+@media (min-width: 769px) {
+  #sidebar {
+    position: relative;
+    transform: translateX(0);
+    width: 320px;
+  }
+  
+  .sidebar-toggle {
+    display: none;
+  }
+  
+  .overlay {
+    display: none;
+  }
+  
+  .close-sidebar {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  #sidebar {
+    width: 100vw;
+  }
+  
+  .message {
+    max-width: 95%;
+  }
+  
+  #messageForm {
+    padding: 10px;
+  }
+  
+  .sidebar-header {
+    padding: 12px 16px;
+  }
+  
+  .video-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
+    aspect-ratio: 1 / 2;
+  }
+  
+  .video-container {
+    aspect-ratio: 1 / 1;
+  }
+}
+
+/* Для ландшафтной ориентации на мобильных */
+@media (orientation: landscape) and (max-height: 500px) {
+  .video-grid {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr;
+    aspect-ratio: 2 / 1;
+  }
+  
+  .video-header {
+    padding: 8px 16px;
+    min-height: 50px;
+  }
+  
+  .call-info {
+    padding: 8px 16px;
+  }
+}
+
+/* Для больших экранов */
+@media (min-width: 1024px) and (min-height: 600px) {
+  .video-grid {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr;
+    aspect-ratio: 2 / 1;
+  }
+  
+  .video-container {
+    aspect-ratio: 1 / 1;
+  }
+}
+
+/* Исправление для очень маленьких экранов */
+@media (max-width: 320px) {
+  #userPanel {
+    flex-direction: column;
+  }
+  
+  #setName {
+    width: 100%;
+  }
+  
+  .modal-buttons {
+    flex-direction: column;
+  }
+  
+  .modal-buttons button {
+    min-width: 100%;
+  }
+}
+
+/* Исправление для iOS Safari */
+@supports (-webkit-touch-callout: none) {
+  #messageInput {
+    font-size: 16px;
+  }
+  
+  .video-container video {
+    object-fit: cover;
+  }
+}
+
+/* Темная тема по умолчанию */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-primary: #0f172a;
+    --bg-secondary: #1e293b;
+    --bg-tertiary: #334155;
+  }
+}
