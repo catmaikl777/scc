@@ -13,13 +13,16 @@
     />
     <meta name="apple-mobile-web-app-title" content="Огненный Кот" />
     <link rel="apple-touch-icon" href="/favicon.ico" />
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Огненный Кот">
-    <link rel="apple-touch-icon" href="/favicon.ico">
-    <meta name="msapplication-TileColor" content="#dc2626">
-    <meta name="theme-color" content="#dc2626">
-    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <meta name="apple-mobile-web-app-title" content="Огненный Кот" />
+    <link rel="apple-touch-icon" href="/favicon.ico" />
+    <meta name="msapplication-TileColor" content="#dc2626" />
+    <meta name="theme-color" content="#dc2626" />
+    <meta name="mobile-web-app-capable" content="yes" />
 
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-messaging-compat.js"></script>
@@ -47,6 +50,14 @@
         --shadow-primary: 0 4px 20px rgba(220, 38, 38, 0.3);
         --shadow-blue: 0 4px 20px rgba(37, 99, 235, 0.3);
         --vh: 1vh;
+
+        /* WhatsApp-like variables */
+        --wa-green: #dc2626; /* Используем ваш красный вместо зеленого */
+        --wa-chat-bg: #0b141a;
+        --wa-message-out: #dc2626;
+        --wa-message-in: #334155;
+        --wa-input-bg: #1e293b;
+        --wa-header-bg: #1e293b;
       }
 
       * {
@@ -60,12 +71,13 @@
       body {
         height: 100%;
         overflow: hidden;
+        background: var(--wa-chat-bg);
       }
 
       body {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
           Oxygen, Ubuntu, Cantarell, sans-serif;
-        background: var(--bg-primary);
+        background: var(--wa-chat-bg);
         color: var(--text-primary);
         line-height: 1.4;
         touch-action: manipulation;
@@ -79,6 +91,7 @@
         width: 100%;
         height: 100%;
         z-index: -1;
+        opacity: 0.3;
       }
 
       #app {
@@ -89,10 +102,71 @@
         background: transparent;
       }
 
-      /* Сайдбар */
+      /* WhatsApp-like Header */
+      .chat-header {
+        background: var(--wa-header-bg);
+        padding: 16px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        border-bottom: 1px solid var(--border-color);
+        min-height: 70px;
+        flex-shrink: 0;
+      }
+
+      .chat-avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: var(--gradient-primary);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: bold;
+        font-size: 18px;
+      }
+
+      .chat-info {
+        flex: 1;
+      }
+
+      .chat-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .chat-status {
+        font-size: 13px;
+        color: var(--text-secondary);
+        margin-top: 2px;
+      }
+
+      .header-actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .header-btn {
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        font-size: 20px;
+        padding: 8px;
+        cursor: pointer;
+        border-radius: 50%;
+        transition: background 0.2s;
+      }
+
+      .header-btn:active {
+        background: rgba(255, 255, 255, 0.1);
+      }
+
+      /* Сайдбар WhatsApp-style */
       #sidebar {
         width: min(320px, 85vw);
-        background: var(--bg-secondary);
+        background: var(--wa-header-bg);
         border-right: 1px solid var(--border-color);
         display: flex;
         flex-direction: column;
@@ -104,8 +178,6 @@
         bottom: 0;
         transform: translateX(-100%);
         box-shadow: 2px 0 10px rgba(0, 0, 0, 0.3);
-        backdrop-filter: blur(10px);
-        background: rgba(30, 41, 59, 0.85);
       }
 
       #sidebar.active {
@@ -117,9 +189,9 @@
         justify-content: space-between;
         align-items: center;
         padding: 16px;
-        background: var(--gradient-primary);
+        background: var(--wa-header-bg);
         border-bottom: 1px solid var(--border-color);
-        min-height: 60px;
+        min-height: 70px;
         flex-shrink: 0;
       }
 
@@ -127,18 +199,17 @@
         margin: 0;
         font-size: 18px;
         font-weight: 700;
-        color: white;
-        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+        color: var(--text-primary);
       }
 
       .close-sidebar {
         display: flex;
         align-items: center;
         justify-content: center;
-        background: rgba(255, 255, 255, 0.2);
+        background: rgba(255, 255, 255, 0.1);
         border: none;
         font-size: 20px;
-        color: white;
+        color: var(--text-primary);
         cursor: pointer;
         padding: 8px;
         width: 44px;
@@ -148,14 +219,14 @@
       }
 
       .close-sidebar:active {
-        background: rgba(255, 255, 255, 0.3);
+        background: rgba(255, 255, 255, 0.2);
         transform: scale(0.95);
       }
 
       /* Панель пользователя */
       #userPanel {
         padding: 16px;
-        background: var(--bg-tertiary);
+        background: var(--wa-header-bg);
         border-bottom: 1px solid var(--border-color);
         display: flex;
         gap: 8px;
@@ -168,7 +239,7 @@
         padding: 12px 16px;
         border: 1px solid var(--border-color);
         border-radius: 20px;
-        background: var(--bg-secondary);
+        background: var(--wa-input-bg);
         color: var(--text-primary);
         font-size: 16px;
         outline: none;
@@ -219,16 +290,15 @@
         margin: 0;
       }
 
-      /* Основной чат */
+      /* Основной чат WhatsApp-style */
       #chat {
         flex: 1;
         display: flex;
         flex-direction: column;
         min-width: 0;
-        background: rgba(15, 23, 42, 0.7);
+        background: var(--wa-chat-bg);
         width: 100%;
         position: relative;
-        backdrop-filter: blur(5px);
       }
 
       #messages {
@@ -242,20 +312,17 @@
         background: transparent;
       }
 
-      /* Сообщения */
+      /* Сообщения WhatsApp-style */
       .message {
         max-width: min(400px, 85%);
         padding: 8px 12px 4px 12px;
-        border-radius: 12px;
-        background: var(--other-message-bg);
+        border-radius: 8px;
+        background: var(--wa-message-in);
         position: relative;
         word-wrap: break-word;
         margin-bottom: 4px;
         word-break: break-word;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
         transition: transform 0.2s;
-        backdrop-filter: blur(5px);
-        background: rgba(51, 65, 85, 0.8);
       }
 
       .message:hover {
@@ -264,12 +331,12 @@
 
       .message.me {
         margin-left: auto;
-        background: linear-gradient(
-          135deg,
-          rgba(220, 38, 38, 0.9) 0%,
-          rgba(37, 99, 235, 0.9) 100%
-        );
-        box-shadow: var(--shadow-primary);
+        background: var(--wa-message-out);
+        border-bottom-right-radius: 4px;
+      }
+
+      .message:not(.me) {
+        border-bottom-left-radius: 4px;
       }
 
       .message-header {
@@ -304,19 +371,17 @@
         flex-shrink: 0;
       }
 
-      /* Форма сообщения */
+      /* Форма сообщения WhatsApp-style */
       #messageForm {
         display: flex;
         gap: 8px;
         padding: 16px;
-        background: rgba(30, 41, 59, 0.8);
+        background: var(--wa-input-bg);
         border-top: 1px solid var(--border-color);
         align-items: center;
         flex-shrink: 0;
         position: relative;
         min-height: 80px;
-        box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
-        backdrop-filter: blur(10px);
       }
 
       #messageInput {
@@ -325,7 +390,7 @@
         padding: 12px 16px;
         border: 1px solid var(--border-color);
         border-radius: 20px;
-        background: var(--bg-tertiary);
+        background: var(--wa-input-bg);
         color: var(--text-primary);
         font-size: 16px;
         outline: none;
@@ -346,7 +411,7 @@
       #messageForm button[type="submit"] {
         padding: 12px;
         border: none;
-        background: var(--gradient-primary);
+        background: var(--wa-message-out);
         color: white;
         border-radius: 50%;
         cursor: pointer;
@@ -358,7 +423,6 @@
         flex-shrink: 0;
         font-size: 16px;
         transition: all 0.2s;
-        box-shadow: var(--shadow-primary);
       }
 
       #messageForm button[type="submit"]:active {
@@ -367,9 +431,9 @@
 
       /* Кнопка загрузки файлов */
       #fileUploadBtn {
-        background: var(--bg-tertiary);
-        border: 1px solid var(--border-color);
-        color: var(--text-primary);
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
         padding: 12px;
         border-radius: 50%;
         cursor: pointer;
@@ -379,20 +443,20 @@
         align-items: center;
         justify-content: center;
         flex-shrink: 0;
-        font-size: 16px;
+        font-size: 20px;
         transition: all 0.2s;
       }
 
       #fileUploadBtn:active {
-        background: var(--primary-blue);
+        background: rgba(255, 255, 255, 0.1);
         transform: scale(0.95);
       }
 
       /* Кнопка голосовых сообщений */
       #voiceMessageBtn {
-        background: var(--primary-red);
-        border: 1px solid var(--border-color);
-        color: var(--text-primary);
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
         padding: 12px;
         border-radius: 50%;
         cursor: pointer;
@@ -402,18 +466,18 @@
         align-items: center;
         justify-content: center;
         flex-shrink: 0;
-        font-size: 16px;
+        font-size: 20px;
         transition: all 0.2s;
-        box-shadow: var(--shadow-primary);
       }
 
       #voiceMessageBtn:active {
-        background: #b91c1c;
+        background: rgba(255, 255, 255, 0.1);
         transform: scale(0.95);
       }
 
       #voiceMessageBtn.recording {
-        background: #dc2626;
+        background: var(--primary-red);
+        color: white;
         animation: pulse 1.5s infinite;
       }
 
@@ -423,19 +487,18 @@
         flex-wrap: wrap;
         gap: 4px;
         padding: 8px;
-        background: rgba(30, 41, 59, 0.8);
+        background: var(--wa-input-bg);
         border-bottom: 1px solid var(--border-color);
         max-height: 120px;
         overflow-y: auto;
         flex-shrink: 0;
-        backdrop-filter: blur(10px);
       }
 
       .emoji-panel button {
         font-size: 20px;
         padding: 8px 12px;
         border: none;
-        background: var(--bg-tertiary);
+        background: transparent;
         border-radius: 8px;
         cursor: pointer;
         flex: 1;
@@ -448,7 +511,7 @@
       }
 
       .emoji-panel button:active {
-        background: var(--primary-red);
+        background: rgba(255, 255, 255, 0.1);
         transform: scale(0.95);
       }
 
@@ -459,7 +522,7 @@
         top: 12px;
         left: 12px;
         z-index: 99;
-        background: var(--gradient-primary);
+        background: var(--wa-message-out);
         color: white;
         border: none;
         border-radius: 50%;
@@ -467,7 +530,6 @@
         height: 44px;
         font-size: 18px;
         cursor: pointer;
-        box-shadow: var(--shadow-primary);
         transition: all 0.2s;
       }
 
@@ -490,13 +552,13 @@
         display: block;
       }
 
-      /* Стили для списка пользователей */
+      /* Стили для списка пользователей WhatsApp-style */
       .user-item {
         display: flex;
         align-items: center;
         gap: 12px;
         padding: 12px 16px;
-        border-radius: 12px;
+        border-radius: 8px;
         margin-bottom: 4px;
         background: transparent;
         cursor: pointer;
@@ -505,11 +567,11 @@
       }
 
       .user-item:hover {
-        background: var(--bg-tertiary);
+        background: rgba(255, 255, 255, 0.05);
       }
 
       .user-item:active {
-        background: var(--border-color);
+        background: rgba(255, 255, 255, 0.1);
         transform: scale(0.98);
       }
 
@@ -519,12 +581,10 @@
         border-radius: 50%;
         background: var(--primary-red);
         flex-shrink: 0;
-        box-shadow: 0 0 6px var(--primary-red);
       }
 
       .user-status.online {
         background: #10b981;
-        box-shadow: 0 0 6px #10b981;
       }
 
       .user-name {
@@ -578,14 +638,13 @@
       }
 
       .private {
-        background: var(--bg-tertiary);
-        border-radius: 12px;
+        background: var(--wa-message-in);
+        border-radius: 8px;
         padding: 12px;
         margin: 8px 0;
         border-left: 3px solid var(--primary-blue);
         max-width: min(400px, 90%);
         margin-left: auto;
-        box-shadow: var(--shadow-blue);
       }
 
       /* Кнопки звонков */
@@ -598,7 +657,7 @@
       .call-btn {
         width: 100%;
         padding: 14px;
-        background: var(--gradient-primary);
+        background: var(--wa-message-out);
         color: white;
         border: none;
         border-radius: 8px;
@@ -608,7 +667,6 @@
         margin-bottom: 8px;
         min-height: 50px;
         transition: all 0.2s;
-        box-shadow: var(--shadow-primary);
       }
 
       .call-btn:active:not(:disabled) {
@@ -619,12 +677,13 @@
         background: var(--text-muted);
         cursor: not-allowed;
         transform: none;
-        box-shadow: none;
       }
 
       .call-btn.end {
-        background: var(--gradient-primary);
+        background: var(--primary-red);
       }
+
+      /* Остальные стили остаются такими же, но с адаптацией под новую цветовую схему */
 
       /* ВИДЕОЗВОНКИ */
       .video-call-container {
@@ -633,7 +692,7 @@
         left: 0;
         right: 0;
         bottom: 0;
-        background: var(--bg-primary);
+        background: var(--wa-chat-bg);
         z-index: 1000;
         display: flex;
         flex-direction: column;
@@ -648,7 +707,7 @@
         justify-content: space-between;
         align-items: center;
         padding: 16px;
-        background: var(--gradient-primary);
+        background: var(--wa-header-bg);
         border-bottom: 1px solid var(--border-color);
         min-height: 60px;
         flex-shrink: 0;
@@ -656,7 +715,7 @@
 
       .video-header h3 {
         margin: 0;
-        color: white;
+        color: var(--text-primary);
         font-size: 18px;
         font-weight: 600;
       }
@@ -668,7 +727,7 @@
       }
 
       .video-controls button {
-        background: var(--bg-tertiary);
+        background: var(--wa-input-bg);
         border: 1px solid var(--border-color);
         color: var(--text-primary);
         padding: 10px;
@@ -702,7 +761,7 @@
 
       .video-container {
         position: relative;
-        background: var(--bg-secondary);
+        background: var(--wa-header-bg);
         border-radius: 12px;
         overflow: hidden;
         min-height: 0;
@@ -714,7 +773,7 @@
         width: 100%;
         height: 100%;
         object-fit: cover;
-        background: var(--bg-tertiary);
+        background: var(--wa-input-bg);
       }
 
       .video-label {
@@ -732,7 +791,7 @@
       .call-info {
         padding: 16px;
         text-align: center;
-        background: var(--bg-secondary);
+        background: var(--wa-header-bg);
         border-top: 1px solid var(--border-color);
         flex-shrink: 0;
       }
@@ -750,7 +809,7 @@
         left: 0;
         right: 0;
         bottom: 0;
-        background: rgba(15, 23, 42, 0.95);
+        background: rgba(11, 20, 26, 0.95);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -763,7 +822,7 @@
       }
 
       .modal-content {
-        background: var(--bg-secondary);
+        background: var(--wa-header-bg);
         padding: 24px;
         border-radius: 16px;
         text-align: center;
@@ -836,12 +895,11 @@
       }
 
       .file-preview {
-        border-radius: 12px;
+        border-radius: 8px;
         overflow: hidden;
-        background: var(--bg-tertiary);
+        background: var(--wa-input-bg);
         border: 1px solid var(--border-color);
         margin-top: 8px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
       }
 
       .file-preview img,
@@ -854,7 +912,7 @@
 
       .file-info {
         padding: 12px;
-        background: var(--bg-secondary);
+        background: var(--wa-header-bg);
       }
 
       .file-name {
@@ -893,7 +951,7 @@
         text-align: center;
         padding: 20px;
         font-size: 48px;
-        background: var(--bg-tertiary);
+        background: var(--wa-input-bg);
         border-radius: 8px;
         color: var(--text-secondary);
       }
@@ -915,7 +973,6 @@
         margin-left: auto;
         flex-shrink: 0;
         transition: all 0.2s;
-        box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);
       }
 
       .call-user-btn:active {
@@ -962,7 +1019,7 @@
       }
 
       ::-webkit-scrollbar-track {
-        background: var(--bg-primary);
+        background: var(--wa-chat-bg);
       }
 
       ::-webkit-scrollbar-thumb {
@@ -1002,8 +1059,8 @@
       }
 
       .voice-player {
-        background: var(--bg-tertiary);
-        border-radius: 12px;
+        background: var(--wa-input-bg);
+        border-radius: 8px;
         padding: 12px;
         margin-top: 8px;
         border: 1px solid var(--border-color);
@@ -1064,7 +1121,7 @@
       .voice-progress {
         width: 100%;
         height: 4px;
-        background: var(--bg-secondary);
+        background: var(--wa-header-bg);
         border-radius: 2px;
         overflow: hidden;
         margin-top: 4px;
@@ -1085,7 +1142,7 @@
         left: 0;
         right: 0;
         bottom: 0;
-        background: rgba(15, 23, 42, 0.95);
+        background: rgba(11, 20, 26, 0.95);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -1098,7 +1155,7 @@
       }
 
       .voice-record-content {
-        background: var(--bg-secondary);
+        background: var(--wa-header-bg);
         padding: 24px;
         border-radius: 16px;
         text-align: center;
@@ -1163,13 +1220,38 @@
       }
 
       .cancel-record-btn {
-        background: var(--bg-tertiary);
+        background: var(--wa-input-bg);
         color: var(--text-primary);
       }
 
       .cancel-record-btn:active {
         background: var(--border-color);
         transform: scale(0.95);
+      }
+
+      .quick-join-call {
+        background: rgba(59, 130, 246, 0.1) !important;
+        border: 1px solid var(--primary-blue) !important;
+        border-radius: 8px !important;
+        padding: 8px 12px !important;
+        margin: 8px 0 !important;
+      }
+
+      .quick-join-call button {
+        transition: all 0.2s;
+      }
+
+      .quick-join-call button:active {
+        transform: scale(0.95);
+      }
+
+      .join-call-item {
+        background: rgba(245, 158, 11, 0.1) !important;
+        border: 1px solid #f59e0b !important;
+      }
+
+      .join-call-item:hover {
+        background: rgba(245, 158, 11, 0.2) !important;
       }
 
       /* Адаптивность */
@@ -1200,31 +1282,33 @@
         }
 
         .emoji-panel button {
+          font-size: 18px;
+          padding: 6px 10px;
           min-width: 40px;
           min-height: 40px;
-          padding: 6px 8px;
-          font-size: 18px;
+        }
+
+        .chat-header {
+          padding: 12px;
         }
 
         .video-grid {
-          grid-template-columns: 1fr 1fr;
-          grid-template-rows: 1fr;
-          gap: 4px;
-          padding: 4px;
+          grid-template-columns: 1fr;
+          grid-template-rows: 1fr 1fr;
+          aspect-ratio: 1 / 2;
         }
 
-        .video-controls {
-          justify-content: center;
+        .video-container {
+          aspect-ratio: 1 / 1;
         }
 
-        .video-controls button {
-          min-width: 40px;
-          min-height: 40px;
-          padding: 8px;
+        .modal-buttons {
+          flex-direction: column;
         }
 
-        .voice-record-content {
-          padding: 20px;
+        .modal-buttons button {
+          flex: none;
+          width: 100%;
         }
 
         .voice-record-controls {
@@ -1232,27 +1316,7 @@
         }
 
         .voice-record-controls button {
-          min-width: 100%;
-        }
-      }
-
-      @media (min-width: 769px) {
-        #sidebar {
-          position: relative;
-          transform: translateX(0);
-          width: 320px;
-        }
-
-        .sidebar-toggle {
-          display: none;
-        }
-
-        .overlay {
-          display: none;
-        }
-
-        .close-sidebar {
-          display: none;
+          width: 100%;
         }
       }
 
@@ -1265,118 +1329,106 @@
           max-width: 95%;
         }
 
-        #messageForm {
-          padding: 10px;
-        }
-
-        .sidebar-header {
-          padding: 12px 16px;
-        }
-
         .video-grid {
-          grid-template-columns: 1fr;
-          grid-template-rows: 1fr 1fr;
-          aspect-ratio: 1 / 2;
-        }
-
-        .video-container {
-          aspect-ratio: 1 / 1;
-        }
-      }
-
-      /* Для ландшафтной ориентации на мобильных */
-      @media (orientation: landscape) and (max-height: 500px) {
-        .video-grid {
-          grid-template-columns: 1fr 1fr;
-          grid-template-rows: 1fr;
-          aspect-ratio: 2 / 1;
+          padding: 4px;
+          gap: 4px;
         }
 
         .video-header {
-          padding: 8px 16px;
-          min-height: 50px;
+          padding: 12px;
         }
 
-        .call-info {
-          padding: 8px 16px;
-        }
-      }
-
-      /* Для больших экранов */
-      @media (min-width: 1024px) and (min-height: 600px) {
-        .video-grid {
-          grid-template-columns: 1fr 1fr;
-          grid-template-rows: 1fr;
-          aspect-ratio: 2 / 1;
+        .video-controls {
+          gap: 4px;
         }
 
-        .video-container {
-          aspect-ratio: 1 / 1;
+        .video-controls button {
+          padding: 8px;
+          min-width: 40px;
+          min-height: 40px;
         }
       }
 
-      /* Исправление для очень маленьких экранов */
-      @media (max-width: 320px) {
+      /* Оверлей для мобильного меню */
+      @media (max-width: 768px) {
+        #sidebar {
+          width: min(320px, 85vw);
+        }
+
+        .overlay {
+          display: none;
+        }
+
+        .overlay.active {
+          display: block;
+        }
+      }
+
+      /* Высота для мобильных браузеров */
+      @media (max-height: 600px) {
+        .chat-header,
+        .sidebar-header {
+          min-height: 60px;
+          padding: 12px;
+        }
+
         #userPanel {
-          flex-direction: column;
+          padding: 12px;
         }
 
-        #setName {
-          width: 100%;
+        #messageForm {
+          min-height: 70px;
         }
 
-        .modal-buttons {
-          flex-direction: column;
-        }
-
-        .modal-buttons button {
-          min-width: 100%;
-        }
-      }
-
-      /* Исправление для iOS Safari */
-      @supports (-webkit-touch-callout: none) {
         #messageInput {
-          font-size: 16px;
+          min-height: 40px;
         }
 
-        .video-container video {
-          object-fit: cover;
-        }
-      }
-
-      /* Темная тема по умолчанию */
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --bg-primary: #0f172a;
-          --bg-secondary: #1e293b;
-          --bg-tertiary: #334155;
+        #messageForm button[type="submit"],
+        #fileUploadBtn,
+        #voiceMessageBtn {
+          width: 40px;
+          height: 40px;
         }
       }
 
-      .quick-join-call {
-        background: rgba(59, 130, 246, 0.1) !important;
-        border: 1px solid var(--primary-blue) !important;
-        border-radius: 8px !important;
-        padding: 8px 12px !important;
-        margin: 8px 0 !important;
+      /* Поддержка PWA */
+      @media (display-mode: standalone) {
+        body {
+          -webkit-overflow-scrolling: touch;
+        }
+
+        #app {
+          height: 100vh;
+          height: calc(var(--vh, 1vh) * 100);
+        }
+
+        .chat-header {
+          padding-top: env(safe-area-inset-top);
+          padding-left: calc(16px + env(safe-area-inset-left));
+          padding-right: calc(16px + env(safe-area-inset-right));
+        }
+
+        #messageForm {
+          padding-bottom: calc(16px + env(safe-area-inset-bottom));
+          padding-left: calc(16px + env(safe-area-inset-left));
+          padding-right: calc(16px + env(safe-area-inset-right));
+        }
       }
 
-      .quick-join-call button {
-        transition: all 0.2s;
-      }
+      /* Улучшенная поддержка безопасных зон */
+      @supports (padding: max(0px)) {
+        .chat-header {
+          padding-left: max(16px, env(safe-area-inset-left));
+          padding-right: max(16px, env(safe-area-inset-right));
+          padding-top: max(16px, env(safe-area-inset-top));
+        }
 
-      .quick-join-call button:active {
-        transform: scale(0.95);
-      }
-
-      .join-call-item {
-        background: rgba(245, 158, 11, 0.1) !important;
-        border: 1px solid #f59e0b !important;
-      }
-
-      .join-call-item:hover {
-        background: rgba(245, 158, 11, 0.2) !important;
+        #messageForm {
+          padding-left: max(16px, env(safe-area-inset-left));
+          padding-right: max(16px, env(safe-area-inset-right));
+          padding-bottom: max(16px, env(safe-area-inset-bottom));
+        }
       }
     </style>
   </head>
@@ -1384,128 +1436,158 @@
     <div id="particles-js"></div>
 
     <div id="app">
-      <button id="sidebarToggle" class="sidebar-toggle">☰</button>
+      <!-- Кнопка открытия сайдбара для мобильных -->
+      <button class="sidebar-toggle" id="mobileSidebarToggle">☰</button>
+      <div class="overlay" onclick="toggleSidebar()"></div>
 
-      <aside id="sidebar">
+      <!-- Сайдбар -->
+      <div id="sidebar">
         <div class="sidebar-header">
-          <h1>ОГНЕННЫЙ КОТ</h1>
-          <button id="closeSidebar" class="close-sidebar">✕</button>
+          <h1>Участники</h1>
+          <button class="close-sidebar" onclick="toggleSidebar()">✕</button>
         </div>
+
         <div id="userPanel">
-          <input id="nameInput" placeholder="Ваше имя" />
+          <input
+            type="text"
+            id="nameInput"
+            placeholder="Ваше имя"
+            maxlength="20"
+          />
           <button id="setName">Сохранить</button>
         </div>
+
         <div id="users">
-          <h2>Участники</h2>
-          <div id="onlineCount">Онлайн: 0</div>
+          <h2>Сейчас онлайн</h2>
+          <div id="onlineCount">0 участников</div>
           <ul id="userList"></ul>
         </div>
+
         <div id="callControls">
-          <button id="startCall" class="call-btn">📞 Начать видеозвонок</button>
-          <button
-            id="joinCall"
-            class="call-btn"
-            style="
-              background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-            "
-          >
-            👥 Присоединиться к звонку
+          <button class="call-btn" onclick="startVideoCall()" id="startCallBtn">
+            📹 Начать видеозвонок
           </button>
-          <button id="endCall" class="call-btn end" disabled>
+          <button
+            class="call-btn end"
+            onclick="endVideoCall()"
+            id="endCallBtn"
+            disabled
+          >
             📞 Завершить звонок
           </button>
         </div>
-      </aside>
+      </div>
 
-      <div class="overlay" id="overlay"></div>
-
-      <main id="chat">
-        <div id="videoCallContainer" class="video-call-container hidden">
-          <div class="video-header">
-            <h3>Видеозвонок</h3>
-            <div class="video-controls">
-              <button id="toggleVideo">🎥</button>
-              <button id="toggleAudio">🎤</button>
-              <button id="closeCall">📞 Завершить</button>
+      <!-- Основной чат -->
+      <div id="chat">
+        <div class="chat-header">
+          <div class="chat-avatar">🔥</div>
+          <div class="chat-info">
+            <div class="chat-title">Огненный Кот Чат</div>
+            <div class="chat-status" id="onlineStatus">
+              <span id="onlineCountHeader">0 участников онлайн</span>
             </div>
           </div>
-          <div class="video-grid">
-            <!-- Локальное видео всегда будет здесь -->
-            <div class="video-container" id="videoContainer_local">
-              <video id="localVideo" autoplay muted playsinline></video>
-              <div class="video-label">Вы</div>
-            </div>
-            <!-- Удаленные видео будут добавляться динамически -->
-          </div>
-          <div class="call-info">
-            <p>Статус: <span id="callStatus">Подключение...</span></p>
-            <p id="participantsCount">Участников: 1</p>
+          <div class="header-actions">
+            <button class="header-btn" onclick="toggleEmojiPanel()">😊</button>
+            <button class="header-btn" id="sidebarToggle" onclick="toggleSidebar()">👥</button>
           </div>
         </div>
 
         <div id="messages"></div>
 
-        <div class="emoji-panel">
-          <button>😀</button><button>😂</button><button>👍</button
-          ><button>🔥</button> <button>❤️</button><button>🎉</button
-          ><button>😎</button><button>😢</button> <button>🤔</button
-          ><button>🙏</button><button>👋</button><button>🎂</button>
-          <button>💯</button><button>🚀</button><button>⭐</button>
+        <!-- Панель эмодзи -->
+        <div class="emoji-panel" id="emojiPanel" style="display: none">
+          <!-- Emojis will be inserted here by JavaScript -->
         </div>
 
+        <!-- Форма отправки сообщения -->
         <form id="messageForm">
-          <input
-            id="messageInput"
-            autocomplete="off"
-            placeholder="Сообщение..."
-          />
           <button
             type="button"
             id="voiceMessageBtn"
-            title="Записать голосовое сообщение"
+            onclick="toggleVoiceRecord()"
           >
             🎤
           </button>
-          <button type="button" id="fileUploadBtn" title="Отправить файл">
+          <textarea
+            id="messageInput"
+            placeholder="Введите сообщение..."
+            maxlength="1000"
+            rows="1"
+          ></textarea>
+          <button type="button" id="fileUploadBtn" onclick="uploadFile()">
             📎
           </button>
-          <input
-            type="file"
-            id="fileInput"
-            accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt"
-            style="display: none"
-          />
           <button type="submit">➤</button>
         </form>
-      </main>
+      </div>
     </div>
 
-    <!-- Модальное окно входящего звонка -->
-    <div id="incomingCallModal" class="modal hidden">
-      <div class="modal-content">
-        <h3>Входящий видеозвонок</h3>
-        <p id="callerName">...</p>
-        <div class="modal-buttons">
-          <button id="acceptCall" class="accept-btn">📞 Принять</button>
-          <button id="rejectCall" class="reject-btn">✕ Отклонить</button>
+    <!-- Модальное окно записи голоса -->
+    <div class="voice-record-modal hidden" id="voiceRecordModal">
+      <div class="voice-record-content">
+        <h3>Запись голосового сообщения</h3>
+        <div class="voice-record-visualization" id="voiceRecordVisualization">
+          <!-- Voice bars will be inserted here -->
+        </div>
+        <div class="voice-record-timer" id="voiceRecordTimer">00:00</div>
+        <div class="voice-record-controls">
+          <button class="stop-record-btn" onclick="stopVoiceRecording()">
+            Остановить
+          </button>
+          <button class="cancel-record-btn" onclick="cancelVoiceRecording()">
+            Отмена
+          </button>
         </div>
       </div>
     </div>
 
-    <!-- Модальное окно записи голосового сообщения -->
-    <div id="voiceRecordModal" class="voice-record-modal hidden">
-      <div class="voice-record-content">
-        <h3>Запись голосового сообщения</h3>
-        <div class="voice-record-visualization" id="voiceRecordVisualization">
-          <!-- Барчики визуализации будут добавляться динамически -->
-        </div>
-        <div class="voice-record-timer" id="voiceRecordTimer">00:00</div>
-        <div class="voice-record-controls">
-          <button id="stopRecordBtn" class="stop-record-btn">
-            ⏹️ Отправить
+    <!-- Контейнер для видеозвонка -->
+    <div class="video-call-container hidden" id="videoCallContainer">
+      <div class="video-header">
+        <h3>Видеозвонок</h3>
+        <div class="video-controls">
+          <button onclick="toggleVideo()" id="toggleVideoBtn">📹</button>
+          <button onclick="toggleAudio()" id="toggleAudioBtn">🎤</button>
+          <button onclick="toggleScreenShare()" id="toggleScreenBtn">🖥️</button>
+          <button
+            onclick="endVideoCall()"
+            style="background: var(--primary-red)"
+          >
+            📞
           </button>
-          <button id="cancelRecordBtn" class="cancel-record-btn">
-            ❌ Отмена
+        </div>
+      </div>
+
+      <div class="video-grid">
+        <div class="video-container">
+          <video id="localVideo" autoplay muted playsinline></video>
+          <div class="video-label">Вы</div>
+        </div>
+        <div class="video-container">
+          <video id="remoteVideo" autoplay playsinline></video>
+          <div class="video-label">Собеседник</div>
+        </div>
+      </div>
+
+      <div class="call-info">
+        <p id="callStatus">Подключение...</p>
+        <p id="callTimer">00:00</p>
+      </div>
+    </div>
+
+    <!-- Модальное окно входящего звонка -->
+    <div class="modal hidden" id="incomingCallModal">
+      <div class="modal-content">
+        <h3>Входящий видеозвонок</h3>
+        <p id="callerName">Пользователь звонит вам</p>
+        <div class="modal-buttons">
+          <button class="accept-btn" onclick="acceptVideoCall()">
+            Принять
+          </button>
+          <button class="reject-btn" onclick="rejectVideoCall()">
+            Отклонить
           </button>
         </div>
       </div>

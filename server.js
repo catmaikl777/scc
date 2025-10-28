@@ -4,8 +4,6 @@ const fs = require("fs");
 const path = require("path");
 const WebSocket = require("ws");
 const { Pool } = require("pg");
-const admin = require("firebase-admin");
-const webpush = require("web-push");
 
 // Настройка подключения к PostgreSQL
 const pool = new Pool({
@@ -23,35 +21,6 @@ pool.on("error", (err, client) => {
   console.error("Unexpected error on idle client", err);
 });
 
-const serviceAccount = {
-  type: "service_account",
-  project_id: process.env.FIREBASE_PROJECT_ID,
-  private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
-  private_key: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-  client_email: process.env.FIREBASE_CLIENT_EMAIL,
-  client_id: process.env.FIREBASE_CLIENT_ID,
-  auth_uri: "https://accounts.google.com/o/oauth2/auth",
-  token_uri: "https://oauth2.googleapis.com/token",
-  auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
-  client_x509_cert_url: process.env.FIREBASE_CLIENT_CERT_URL,
-};
-
-try {
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-  });
-  console.log("✅ Firebase Admin initialized");
-} catch (error) {
-  console.warn("⚠️ Firebase Admin initialization failed:", error.message);
-}
-
-// Настройка VAPID для web-push (fallback)
-webpush.setVapidDetails(
-  "mailto:your-email@example.com",
-  process.env.VAPID_PUBLIC_KEY,
-  process.env.VAPID_PRIVATE_KEY
-);
-
 // Функции для работы с базой данных
 const db = {
   async init() {
@@ -63,16 +32,6 @@ const db = {
           username VARCHAR(50) UNIQUE NOT NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS user_fcm_tokens (
-          id SERIAL PRIMARY KEY,
-          user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-          fcm_token VARCHAR(500) UNIQUE NOT NULL,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
 
@@ -226,6 +185,9 @@ const db = {
           "INSERT INTO users (username) VALUES ($1) RETURNING id, username",
           [username]
         );
+        console.log(`✅ New user created: ${username}`);
+      } else {
+        console.log(`✅ Existing user found: ${username}`);
       }
 
       await client.query(
@@ -245,16 +207,31 @@ const db = {
   async createUserSession(userId, sessionId) {
     const client = await pool.connect();
     try {
-      // Сначала создаем сессию, потом очищаем дубликаты
-      const result = await client.query(
-        "INSERT INTO user_sessions (user_id, session_id) VALUES ($1, $2) RETURNING id",
-        [userId, sessionId]
+      // ИСПРАВЛЕНИЕ: Сначала проверяем, существует ли уже сессия
+      const existingSession = await client.query(
+        "SELECT id FROM user_sessions WHERE session_id = $1",
+        [sessionId]
       );
 
-      // Очищаем дублирующиеся сессии после создания новой
+      if (existingSession.rows.length > 0) {
+        // Если сессия уже существует, обновляем ее
+        console.log(`🔄 Updating existing session: ${sessionId}`);
+        await client.query(
+          "UPDATE user_sessions SET user_id = $1, disconnected_at = NULL WHERE session_id = $2",
+          [userId, sessionId]
+        );
+      } else {
+        // Если сессии нет, создаем новую
+        await client.query(
+          "INSERT INTO user_sessions (user_id, session_id) VALUES ($1, $2)",
+          [userId, sessionId]
+        );
+      }
+
+      // Очищаем дублирующиеся сессии после создания/обновления
       await this.cleanupDuplicateSessions(userId, sessionId);
 
-      return result.rows[0];
+      return { sessionId, userId };
     } catch (error) {
       console.error("Error in createUserSession:", error);
       throw error;
@@ -455,111 +432,11 @@ const db = {
   },
 };
 
-const fcmDb = {
-  async saveFCMToken(userId, token) {
-    const client = await pool.connect();
-    try {
-      await client.query(
-        `
-        INSERT INTO user_fcm_tokens (user_id, fcm_token) 
-        VALUES ($1, $2)
-        ON CONFLICT (fcm_token) 
-        DO UPDATE SET user_id = $1, updated_at = CURRENT_TIMESTAMP
-      `,
-        [userId, token]
-      );
-      console.log(`✅ FCM token saved for user ${userId}`);
-    } catch (error) {
-      console.error("Error saving FCM token:", error);
-      throw error;
-    } finally {
-      client.release();
-    }
-  },
-
-  async getFCMTokens(userIds) {
-    const client = await pool.connect();
-    try {
-      const result = await client.query(
-        `
-        SELECT DISTINCT fcm_token 
-        FROM user_fcm_tokens 
-        WHERE user_id = ANY($1)
-      `,
-        [userIds]
-      );
-      return result.rows.map((row) => row.fcm_token);
-    } catch (error) {
-      console.error("Error getting FCM tokens:", error);
-      return [];
-    } finally {
-      client.release();
-    }
-  },
-
-  async deleteFCMToken(token) {
-    const client = await pool.connect();
-    try {
-      await client.query("DELETE FROM user_fcm_tokens WHERE fcm_token = $1", [
-        token,
-      ]);
-    } catch (error) {
-      console.error("Error deleting FCM token:", error);
-    } finally {
-      client.release();
-    }
-  },
-};
-
-// Функция отправки push-уведомления
-async function sendPushNotification(tokens, notificationData) {
-  if (!tokens || tokens.length === 0) return;
-
-  const message = {
-    notification: {
-      title: notificationData.title,
-      body: notificationData.body,
-    },
-    data: notificationData.data || {},
-    android: {
-      priority: "high",
-    },
-    apns: {
-      payload: {
-        aps: {
-          sound: "default",
-          badge: 1,
-        },
-      },
-    },
-    tokens: tokens,
-  };
-
-  try {
-    const response = await admin.messaging().sendEachForMulticast(message);
-    console.log(
-      `✅ Push notification sent successfully: ${response.successCount} successful`
-    );
-
-    // Удаляем невалидные токены
-    if (response.failureCount > 0) {
-      response.responses.forEach((resp, idx) => {
-        if (!resp.success) {
-          console.log(
-            `❌ Failed to send to token: ${tokens[idx]}, error: ${resp.error}`
-          );
-          fcmDb.deleteFCMToken(tokens[idx]);
-        }
-      });
-    }
-  } catch (error) {
-    console.error("❌ Error sending push notification:", error);
-  }
-}
+//////////////////
 
 // HTTP сервер
 const server = http.createServer((req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Origin", "https://fire-catchat.vercel.app/");
   res.setHeader(
     "Access-Control-Allow-Methods",
     "GET, POST, OPTIONS, PUT, DELETE"
@@ -711,44 +588,23 @@ wss.on("connection", async (ws, req) => {
   console.log(`🔌 New WebSocket connection: ${sessionId}`);
 
   try {
-    // Создаем временное имя пользователя
-    const tempUsername = `User_${Date.now()}_${Math.random()
-      .toString(36)
-      .substr(2, 6)}`;
-    currentUser = await db.findOrCreateUser(tempUsername);
-    userId = currentUser.id;
+    // ИСПРАВЛЕНИЕ: НЕ создаем сессию сразу, только сохраняем в памяти
+    clients.set(sessionId, { ws, user: null, userId: null, sessionId });
 
-    // Создаем сессию (она сама очистит дубликаты)
-    await db.createUserSession(userId, sessionId);
-
-    // Сохраняем в памяти
-    clients.set(sessionId, { ws, user: currentUser, userId, sessionId });
-
-    // Отправляем историю и инициализацию
+    // Отправляем историю и инициализацию без имени
     const history = await db.getMessageHistory();
     ws.send(JSON.stringify({ type: "history", history }));
     ws.send(
       JSON.stringify({
         type: "init",
-        id: userId,
-        name: currentUser.username,
+        id: null, // Пока нет ID
+        name: null, // Пока нет имени
         sessionId: sessionId,
       })
     );
 
-    await db.saveMessage(
-      userId,
-      "system",
-      `${currentUser.username} вошёл в чат`
-    );
-    broadcast(
-      { type: "system", text: `🐱 ${currentUser.username} вошёл в чат` },
-      sessionId
-    );
-    await broadcastUsers();
-
     console.log(
-      `✅ User ${currentUser.username} (${userId}) connected with session ${sessionId}`
+      `✅ New connection established with session ${sessionId}, waiting for name...`
     );
   } catch (error) {
     console.error("❌ Error during connection setup:", error);
@@ -810,26 +666,30 @@ wss.on("connection", async (ws, req) => {
             }
 
             try {
-              const isAvailable = await db.isUsernameAvailable(userId, newName);
-              if (!isAvailable) {
-                ws.send(
-                  JSON.stringify({
-                    type: "system",
-                    text: "❌ Это имя уже занято. Выберите другое.",
-                  })
-                );
-                break;
+              // Создаем/находим пользователя
+              const user = await db.findOrCreateUser(newName);
+
+              // Обновляем данные в памяти
+              currentUser = user;
+              userId = user.id;
+
+              const clientData = clients.get(sessionId);
+              if (clientData) {
+                clientData.user = user;
+                clientData.userId = userId;
               }
 
-              const oldName = currentUser.username;
-              currentUser.username = newName;
+              // ИСПРАВЛЕНИЕ: Создаем сессию только сейчас, когда есть userId
+              await db.createUserSession(userId, sessionId);
 
-              await db.updateUsername(userId, newName);
-              await db.saveMessage(
-                userId,
-                "action",
-                `${oldName} сменил имя на ${newName}`
-              );
+              // Проверяем, было ли у пользователя предыдущее имя
+              const oldName = clientData?.user?.username || newName;
+
+              // Если имя изменилось, обновляем в базе
+              if (user.username !== newName) {
+                await db.updateUsername(userId, newName);
+                user.username = newName;
+              }
 
               // Очищаем дублирующиеся сессии
               const closedCount = await db.cleanupDuplicateSessions(
@@ -843,6 +703,7 @@ wss.on("connection", async (ws, req) => {
                 );
               }
 
+              // Отправляем подтверждение клиенту
               ws.send(
                 JSON.stringify({
                   type: "name_updated",
@@ -851,70 +712,51 @@ wss.on("connection", async (ws, req) => {
                 })
               );
 
-              broadcast({
-                type: "action",
-                name: oldName,
-                text: `сменил имя на ${newName}`,
-              });
-              await broadcastUsers();
+              // Если это первое установление имени (не смена), уведомляем о входе
+              if (!clientData?.user?.username) {
+                await db.saveMessage(
+                  userId,
+                  "system",
+                  `${newName} вошёл в чат`
+                );
+                broadcast(
+                  { type: "system", text: `🐱 ${newName} вошёл в чат` },
+                  sessionId
+                );
+                await broadcastUsers();
+              } else {
+                // Если это смена имени
+                await db.saveMessage(
+                  userId,
+                  "action",
+                  `${oldName} сменил имя на ${newName}`
+                );
+                broadcast({
+                  type: "action",
+                  name: oldName,
+                  text: `сменил имя на ${newName}`,
+                });
+                await broadcastUsers();
+              }
+
               ws.send(
                 JSON.stringify({
                   type: "system",
-                  text: `✅ Имя успешно изменено на ${newName}`,
+                  text: `✅ Имя успешно установлено: ${newName}`,
                 })
+              );
+
+              console.log(
+                `✅ User ${newName} (${userId}) name set successfully`
               );
             } catch (error) {
-              console.error("Error updating username:", error);
+              console.error("Error setting username:", error);
               ws.send(
                 JSON.stringify({
                   type: "system",
-                  text: "❌ Ошибка при изменении имени",
+                  text: "❌ Ошибка при установке имени",
                 })
               );
-            }
-          }
-          break;
-
-        case "fcm_token":
-          if (message.token && userId) {
-            await fcmDb.saveFCMToken(userId, message.token);
-            console.log(`✅ FCM token received from ${currentUser.username}`);
-          }
-          break;
-
-        // Добавьте обработчик send_notification
-        case "send_notification":
-          if (message.title && message.body) {
-            // Определяем кому отправлять уведомление
-            let targetUserIds = [];
-
-            if (message.userId && message.userId !== userId) {
-              // Не отправляем уведомление себе
-              targetUserIds = [message.userId];
-            } else if (message.roomId) {
-              // Отправляем всем в комнате кроме себя
-              const room = rooms.get(message.roomId);
-              if (room) {
-                targetUserIds = Array.from(room.users.values())
-                  .filter((user) => user.userId !== userId)
-                  .map((user) => user.userId);
-              }
-            } else {
-              // Отправляем всем кроме себя (для системных уведомлений)
-              targetUserIds = Array.from(clients.values())
-                .filter((client) => client.userId !== userId)
-                .map((client) => client.userId);
-            }
-
-            if (targetUserIds.length > 0) {
-              const tokens = await fcmDb.getFCMTokens(targetUserIds);
-              if (tokens.length > 0) {
-                await sendPushNotification(tokens, {
-                  title: message.title,
-                  body: message.body,
-                  data: message.data || {},
-                });
-              }
             }
           }
           break;
@@ -1444,135 +1286,117 @@ wss.on("connection", async (ws, req) => {
               sessionId
             );
 
-            // Обновляем список пользователей для оставшихся участников
-            if (room.users.size > 0) {
-              const usersInRoom = Array.from(room.users.entries()).map(
-                ([sid, user]) => ({
-                  sessionId: sid,
-                  userId: user.userId,
-                  userName: user.userName,
-                })
-              );
+            broadcastToRoom(message.roomId, {
+              type: "system",
+              text: `👤 ${userName} покинул звонок`,
+            });
 
-              broadcastToRoom(message.roomId, {
-                type: "room_users",
-                users: usersInRoom,
-                roomId: message.roomId,
-              });
-            } else {
-              rooms.delete(message.roomId);
-              console.log(`🗑️ Room ${message.roomId} deleted (no users)`);
-            }
-          }
-          break;
-
-        case "call_rejected":
-          if (message.roomId && rooms.has(message.roomId)) {
-            const room = rooms.get(message.roomId);
-            const caller = clients.get(room.creator);
-            if (caller && caller.ws.readyState === WebSocket.OPEN) {
-              caller.ws.send(
-                JSON.stringify({
-                  type: "call_rejected",
-                  roomId: message.roomId,
-                  userName: currentUser.username,
-                })
-              );
-            }
-            // Удаляем комнату если это индивидуальный звонок
-            if (!room.isGroupCall) {
-              rooms.delete(message.roomId);
+            // Если комната пуста, удаляем её через 30 секунд
+            if (room.users.size === 0) {
               console.log(
-                `🗑️ Individual call room ${message.roomId} deleted (rejected)`
+                `🗑️ Room ${message.roomId} is empty, scheduling cleanup`
               );
+              room.isActive = false;
+              setTimeout(() => {
+                if (
+                  rooms.has(message.roomId) &&
+                  rooms.get(message.roomId).users.size === 0
+                ) {
+                  rooms.delete(message.roomId);
+                  console.log(`🗑️ Room ${message.roomId} cleaned up`);
+                }
+              }, 30000);
             }
           }
-          break;
-
-        case "get_active_calls":
-          const activeCalls = Array.from(rooms.entries())
-            .filter(([roomId, room]) => room.isActive && room.isGroupCall)
-            .map(([roomId, room]) => ({
-              roomId,
-              creatorName: room.users.get(room.creator)?.userName || "Unknown",
-              participantsCount: room.users.size,
-              createdAt: room.createdAt,
-            }));
-
-          ws.send(
-            JSON.stringify({
-              type: "active_calls",
-              calls: activeCalls,
-            })
-          );
           break;
 
         case "end_call":
           if (message.roomId && rooms.has(message.roomId)) {
             const room = rooms.get(message.roomId);
+            const userName = currentUser.username;
 
-            // Помечаем комнату как неактивную
+            console.log(
+              `📞 Call ended by ${userName} in room ${message.roomId}`
+            );
+
+            // Отправляем всем участникам уведомление о завершении звонка
+            broadcastToRoom(
+              message.roomId,
+              {
+                type: "call_ended",
+                endedBy: userName,
+                roomId: message.roomId,
+                message: `Звонок завершен пользователем ${userName}`,
+              },
+              sessionId
+            );
+
+            // Устанавливаем флаг неактивности и очищаем комнату
             room.isActive = false;
+            room.users.clear();
 
-            broadcastToRoom(message.roomId, {
-              type: "call_ended",
-              roomId: message.roomId,
-              endedBy: currentUser.username,
-            });
-
-            // Уведомляем всех о завершении звонка
-            broadcast({
-              type: "group_call_ended",
-              roomId: message.roomId,
-              endedBy: currentUser.username,
-            });
-
-            // Удаляем комнату через некоторое время
+            // Удаляем комнату немедленно
             setTimeout(() => {
               if (rooms.has(message.roomId)) {
                 rooms.delete(message.roomId);
                 console.log(`🗑️ Room ${message.roomId} deleted after call end`);
               }
-            }, 30000); // 30 секунд для завершения всех соединений
+            }, 5000);
+          }
+          break;
 
-            console.log(
-              `📞 Call ended in room ${message.roomId} by ${currentUser.username}`
+        case "typing":
+          if (message.roomId) {
+            broadcastToRoom(
+              message.roomId,
+              {
+                type: "typing",
+                userId: userId,
+                userName: currentUser.username,
+                isTyping: message.isTyping,
+              },
+              sessionId
+            );
+          } else {
+            broadcast(
+              {
+                type: "typing",
+                userId: userId,
+                userName: currentUser.username,
+                isTyping: message.isTyping,
+              },
+              sessionId
             );
           }
           break;
 
+        case "ping":
+          ws.send(JSON.stringify({ type: "pong" }));
+          break;
+
         default:
-          console.log("❌ Unknown message type:", message.type);
-          ws.send(
-            JSON.stringify({
-              type: "error",
-              text: "❌ Неизвестный тип сообщения",
-            })
-          );
+          console.log("Unknown message type:", message.type);
       }
     } catch (error) {
-      console.error("❌ Error processing message:", error);
-      try {
-        ws.send(
-          JSON.stringify({
-            type: "system",
-            text: "❌ Ошибка обработки сообщения",
-          })
-        );
-      } catch (sendError) {
-        console.error("Error sending error message:", sendError);
-      }
+      console.error("Error processing message:", error);
+      ws.send(
+        JSON.stringify({
+          type: "error",
+          text: "❌ Ошибка обработки сообщения",
+        })
+      );
     }
   });
 
   ws.on("close", async (code, reason) => {
     console.log(
-      `🔌 WebSocket connection closed: ${sessionId} (user: ${currentUser?.username})`,
+      `🔌 WebSocket connection closed: ${sessionId} (user: ${
+        currentUser?.username || "unknown"
+      })`,
       code,
       reason?.toString()
     );
 
-    // ИСПРАВЛЕНИЕ: Не обрабатываем как ошибку закрытие дублирующих сессий
     if (
       code === 4000 &&
       reason === "Duplicate session closed by new connection"
@@ -1602,7 +1426,6 @@ wss.on("connection", async (ws, req) => {
               sessionId
             );
 
-            // Обновляем список пользователей для оставшихся участников
             if (room.users.size > 0) {
               const usersInRoom = Array.from(room.users.entries()).map(
                 ([sid, user]) => ({
@@ -1627,138 +1450,123 @@ wss.on("connection", async (ws, req) => {
       });
 
       const clientData = clients.get(sessionId);
-      if (clientData && currentUser) {
-        await db.endUserSession(sessionId);
-        clients.delete(sessionId);
-        await db.saveMessage(
-          userId,
-          "system",
-          `${currentUser.username} вышел из чат`
-        );
-        broadcast({
-          type: "system",
-          text: `🐱 ${currentUser.username} вышел из чата`,
-        });
-        await broadcastUsers();
 
-        console.log(
-          `✅ User ${currentUser.username} (${userId}) disconnected, session ${sessionId} removed`
-        );
+      // ИСПРАВЛЕНИЕ: Завершаем сессию только если она была создана (есть userId)
+      if (clientData && userId) {
+        await db.endUserSession(sessionId);
+
+        if (currentUser) {
+          await db.saveMessage(
+            userId,
+            "system",
+            `${currentUser.username} вышел из чата`
+          );
+          broadcast({
+            type: "system",
+            text: `🐱 ${currentUser.username} вышел из чата`,
+          });
+          await broadcastUsers();
+
+          console.log(
+            `✅ User ${currentUser.username} (${userId}) disconnected, session ${sessionId} removed`
+          );
+        }
       }
+
+      // Всегда удаляем из памяти
+      clients.delete(sessionId);
+      console.log(`✅ Session ${sessionId} removed from memory`);
     } catch (error) {
       console.error("❌ Error during connection cleanup:", error);
     }
   });
 
   ws.on("error", (error) => {
-    console.error(
-      "❌ WebSocket error for session",
-      sessionId,
-      "user:",
-      currentUser?.username,
-      "error:",
-      error
-    );
+    console.error(`❌ WebSocket error for session ${sessionId}:`, error);
   });
 });
 
-// Улучшенная очистка старых сессий
-async function cleanupOldSessions() {
-  try {
-    const client = await pool.connect();
+// Очистка неактивных комнат каждые 5 минут
+setInterval(() => {
+  const now = Date.now();
+  let cleanedCount = 0;
 
-    // Закрываем сессии в базе данных старше 1 часа
-    await client.query(`
-      UPDATE user_sessions SET disconnected_at = CURRENT_TIMESTAMP 
-      WHERE disconnected_at IS NULL AND connected_at < NOW() - INTERVAL '1 hour'
-    `);
+  rooms.forEach((room, roomId) => {
+    // Удаляем комнаты, которые неактивны более 1 часа
+    if (!room.isActive || now - room.createdAt > 3600000) {
+      rooms.delete(roomId);
+      cleanedCount++;
+      console.log(`🧹 Cleaned up inactive room: ${roomId}`);
+    }
+  });
 
-    // Закрываем соединения в памяти для пользователей с неактивными сессиями
-    clients.forEach((clientData, sessionId) => {
-      // Если соединение закрыто, но все еще в памяти - удаляем
-      if (clientData.ws.readyState !== WebSocket.OPEN) {
-        clients.delete(sessionId);
-        console.log(`🧹 Removed closed connection from memory: ${sessionId}`);
-      }
-    });
-
-    // Очищаем пустые комнаты (старше 1 часа)
-    const now = Date.now();
-    rooms.forEach((room, roomId) => {
-      if (room.users.size === 0 && now - room.createdAt > 3600000) {
-        rooms.delete(roomId);
-        console.log(`🧹 Removed empty room: ${roomId}`);
-      }
-    });
-
-    client.release();
-    console.log("🧹 Old sessions and rooms cleaned up");
-  } catch (error) {
-    console.error("Error cleaning up old sessions:", error);
+  if (cleanedCount > 0) {
+    console.log(`🧹 Cleaned up ${cleanedCount} inactive rooms`);
   }
-}
+}, 300000);
 
-setInterval(cleanupOldSessions, 10 * 60 * 1000); // Каждые 10 минут
+// Graceful shutdown
+process.on("SIGINT", async () => {
+  console.log("\n🛑 Received SIGINT, shutting down gracefully...");
 
-const PORT = process.env.PORT || 3000;
+  // Закрываем все WebSocket соединения
+  clients.forEach((client, sessionId) => {
+    try {
+      if (client.ws.readyState === WebSocket.OPEN) {
+        client.ws.close(1001, "Server shutting down");
+      }
+    } catch (error) {
+      console.error(`Error closing client ${sessionId}:`, error);
+    }
+  });
+
+  // Закрываем WebSocket сервер
+  wss.close(() => {
+    console.log("✅ WebSocket server closed");
+  });
+
+  // Закрываем HTTP сервер
+  server.close(async () => {
+    console.log("✅ HTTP server closed");
+
+    // Закрываем пул соединений с базой данных
+    try {
+      await pool.end();
+      console.log("✅ Database connections closed");
+    } catch (error) {
+      console.error("Error closing database connections:", error);
+    }
+
+    process.exit(0);
+  });
+
+  // Force shutdown after 10 seconds
+  setTimeout(() => {
+    console.log("⚠️ Forcing shutdown after timeout");
+    process.exit(1);
+  }, 10000);
+});
+
+// Запуск сервера
+const PORT = process.env.PORT || 10000;
 
 async function startServer() {
   try {
     await db.init();
-    await cleanupOldSessions();
     server.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📡 WebSocket server ready for connections`);
       console.log(
-        `❤️  Health check available at http://localhost:${PORT}/health`
+        `💾 Database: ${
+          process.env.DATABASE_URL ? "Connected" : "Not configured"
+        }`
       );
-      console.log(`💾 Database connection established`);
+      console.log(`🌐 Environment: ${process.env.NODE_ENV || "development"}`);
     });
   } catch (error) {
     console.error("❌ Failed to start server:", error);
     process.exit(1);
   }
 }
-
-function gracefulShutdown() {
-  console.log("🔄 Starting graceful shutdown...");
-
-  wss.close(() => {
-    console.log("✅ WebSocket server closed");
-  });
-
-  clients.forEach((client, sessionId) => {
-    try {
-      if (client.ws.readyState === WebSocket.OPEN) {
-        client.ws.close(1001, "Server shutdown");
-      }
-    } catch (error) {
-      console.error("Error closing client connection:", error);
-    }
-  });
-
-  pool.end(() => {
-    console.log("✅ Database pool closed");
-    process.exit(0);
-  });
-
-  setTimeout(() => {
-    console.log("⚠️ Forced shutdown");
-    process.exit(1);
-  }, 10000);
-}
-
-process.on("SIGTERM", gracefulShutdown);
-process.on("SIGINT", gracefulShutdown);
-
-process.on("uncaughtException", (error) => {
-  console.error("❌ Uncaught Exception:", error);
-  gracefulShutdown();
-});
-
-process.on("unhandledRejection", (reason, promise) => {
-  console.error("❌ Unhandled Rejection at:", promise, "reason:", reason);
-  gracefulShutdown();
-});
 
 startServer();
