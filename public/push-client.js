@@ -1,5 +1,6 @@
 (function(){
-  const apiBase = '';
+  // URL бэкенда на Render
+  const apiBase = 'https://aqqqqqq-2.onrender.com';
   let isSubscribed = false;
 
   async function urlBase64ToUint8Array(base64String) {
@@ -14,7 +15,7 @@
   }
 
   async function getVapidPublicKey() {
-    const res = await fetch('/api/push/vapidPublicKey');
+    const res = await fetch(`${apiBase}/api/push/vapidPublicKey`);
     const { publicKey } = await res.json();
     return publicKey;
   }
@@ -92,7 +93,7 @@
         });
       }
 
-      const res = await fetch('/api/push/subscribe', {
+      const res = await fetch(`${apiBase}/api/push/subscribe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(subscription)
@@ -124,7 +125,7 @@
       const registration = await navigator.serviceWorker.ready;
       const subscription = await registration.pushManager.getSubscription();
       if (subscription) {
-        await fetch('/api/push/unsubscribe', {
+        await fetch(`${apiBase}/api/push/unsubscribe`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ endpoint: subscription.endpoint })
