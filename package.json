@@ -12,6 +12,7 @@
     "@capacitor/cli": "^7.4.4",
     "@capacitor/core": "^7.4.4",
     "pg": "^8.11.3",
+    "web-push": "^3.6.7",
     "ws": "^8.18.0"
   },
   "engines": {

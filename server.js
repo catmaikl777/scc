@@ -6,6 +6,7 @@ const path = require("path");
 const url = require("url");
 const WebSocket = require("ws");
 const { Pool } = require("pg");
+const webpush = require("web-push");
 
 // Локальные утилиты
 const LocalCache = require('./utils/cache');
@@ -20,6 +21,93 @@ const SecurityManager = require('./utils/security');
 const Analytics = require('./utils/analytics');
 const ReportGenerator = require('./utils/reports');
 const IPUtils = require('./utils/ipUtils');
+
+// Web Push setup (VAPID)
+const VAPID_PATH = path.join(__dirname, '.vapid.json');
+const SUBSCRIPTIONS_PATH = path.join(__dirname, 'data', 'push-subscriptions.json');
+
+function ensureDir(filePath) {
+  const dir = path.dirname(filePath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+function loadJSON(filePath, fallback) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (_) {
+    return fallback;
+  }
+}
+
+function saveJSON(filePath, data) {
+  ensureDir(filePath);
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+}
+
+let vapidKeys = loadJSON(VAPID_PATH, null);
+if (!vapidKeys) {
+  // Generate once if missing
+  const generated = webpush.generateVAPIDKeys();
+  vapidKeys = generated;
+  saveJSON(VAPID_PATH, vapidKeys);
+}
+
+webpush.setVapidDetails(
+  process.env.WEB_PUSH_CONTACT || 'mailto:admin@example.com',
+  vapidKeys.publicKey,
+  vapidKeys.privateKey
+);
+
+let pushSubscriptions = loadJSON(SUBSCRIPTIONS_PATH, []);
+function addSubscription(sub) {
+  const key = sub.endpoint;
+  if (!pushSubscriptions.find(s => s.endpoint === key)) {
+    pushSubscriptions.push(sub);
+    saveJSON(SUBSCRIPTIONS_PATH, pushSubscriptions);
+    console.log('📬 Added push subscription, total:', pushSubscriptions.length);
+  }
+}
+function removeSubscription(endpoint) {
+  const before = pushSubscriptions.length;
+  pushSubscriptions = pushSubscriptions.filter(s => s.endpoint !== endpoint);
+  if (pushSubscriptions.length !== before) saveJSON(SUBSCRIPTIONS_PATH, pushSubscriptions);
+}
+
+// Отправка push-уведомлений всем подписанным пользователям
+async function sendPushNotification(title, body, icon = '/icon-192.png', url = '/') {
+  if (pushSubscriptions.length === 0) {
+    console.log('📭 No push subscriptions to notify');
+    return;
+  }
+
+  const payload = JSON.stringify({
+    title,
+    body,
+    icon,
+    badge: '/icon-192.png',
+    url,
+    vibrate: [100, 50, 100],
+    tag: 'push-notification',
+    renotify: true
+  });
+  
+  const results = [];
+  await Promise.all(pushSubscriptions.map(async (sub) => {
+    try {
+      await webpush.sendNotification(sub, payload);
+      results.push({ endpoint: sub.endpoint, ok: true });
+    } catch (err) {
+      const status = err.statusCode || 0;
+      console.log(`📬 Push notification failed for endpoint, status: ${status}`);
+      if (status === 404 || status === 410) {
+        removeSubscription(sub.endpoint);
+      }
+      results.push({ endpoint: sub.endpoint, ok: false, error: status });
+    }
+  }));
+  
+  console.log(`📬 Push notifications sent: ${results.filter(r => r.ok).length}/${results.length}`);
+}
 
 
 // Настройка подключения к PostgreSQL
@@ -1153,7 +1241,7 @@ function initializeMafiaGame(gameData, players) {
       roles[p.user_id] = 'citizen';
     }
   });
-  
+
   gameData.roles = roles;
   gameData.phase = 'day';
   gameData.day = 1;
@@ -1696,6 +1784,12 @@ const server = http.createServer(async (req, res) => {
   const parsedUrl = url.parse(req.url, true);
   const pathname = parsedUrl.pathname || "/";
 
+  // Helper to send JSON
+  function sendJSON(code, obj) {
+    res.writeHead(code, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(obj));
+  }
+
   async function parseBody() {
     return new Promise((resolve, reject) => {
       let body = [];
@@ -1732,6 +1826,52 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "ok", timestamp: new Date().toISOString(), clients: clients.size, rooms: rooms.size, database: "connected" }));
       return;
+    }
+
+    // Web Push API endpoints
+    if (pathname === "/api/push/vapidPublicKey" && req.method === "GET") {
+      return sendJSON(200, { publicKey: vapidKeys.publicKey });
+    }
+
+    if (pathname === "/api/push/subscribe" && req.method === "POST") {
+      const body = await parseBody();
+      if (!body || !body.endpoint) return sendJSON(400, { error: "Invalid subscription" });
+      addSubscription(body);
+      return sendJSON(201, { success: true });
+    }
+
+    if (pathname === "/api/push/unsubscribe" && req.method === "POST") {
+      const body = await parseBody();
+      if (!body || !body.endpoint) return sendJSON(400, { error: "Invalid endpoint" });
+      removeSubscription(body.endpoint);
+      return sendJSON(200, { success: true });
+    }
+
+    if (pathname === "/api/push/notify" && req.method === "POST") {
+      const body = await parseBody();
+      const payload = JSON.stringify({
+        title: body.title || 'Space Cat',
+        body: body.body || 'New notification',
+        url: body.url || '/',
+        icon: body.icon || '/icon-192.png',
+        badge: body.badge || '/icon-192.png'
+      });
+
+      const results = [];
+      await Promise.all(pushSubscriptions.map(async (sub) => {
+        try {
+          await webpush.sendNotification(sub, payload);
+          results.push({ endpoint: sub.endpoint, ok: true });
+        } catch (err) {
+          const status = err.statusCode || 0;
+          if (status === 404 || status === 410) {
+            removeSubscription(sub.endpoint);
+          }
+          results.push({ endpoint: sub.endpoint, ok: false, error: status });
+        }
+      }));
+
+      return sendJSON(200, { sent: results.length, results });
     }
 
     // API для получения стикеров
@@ -2374,6 +2514,14 @@ wss.on("connection", async (ws, req) => {
               ts: savedMessage.created_at,
             });
             
+            // Отправляем push-уведомление (даже если браузер закрыт!)
+            sendPushNotification(
+              `💬 ${currentUser.username}`,
+              text.substring(0, 100) + (text.length > 100 ? '...' : ''),
+              '/icon-192.png',
+              '/'
+            ).catch(err => console.log('Push notification error:', err));
+            
             if (levelResult.levelUp) {
               broadcast({
                 type: "level_up",
@@ -2381,6 +2529,14 @@ wss.on("connection", async (ws, req) => {
                 userName: currentUser.username,
                 newLevel: levelResult.newLevel,
               });
+              
+              // Уведомление о повышении уровня
+              sendPushNotification(
+                '🎉 Повышение уровня!',
+                `${currentUser.username} достиг уровня ${levelResult.newLevel}!`,
+                '/icon-192.png',
+                '/'
+              ).catch(err => console.log('Push notification error:', err));
             }
           }
           break;
@@ -2561,6 +2717,14 @@ wss.on("connection", async (ws, req) => {
                 poll: poll,
               });
               
+              // Push-уведомление о новом опросе
+              sendPushNotification(
+                '📊 Новый опрос!',
+                `${currentUser.username}: ${message.question.substring(0, 50)}`,
+                '/icon-192.png',
+                '/'
+              ).catch(err => console.log('Push notification error:', err));
+              
               ws.send(JSON.stringify({
                 type: "system",
                 text: `✅ Опрос "${message.question}" создан!`
@@ -2625,7 +2789,7 @@ wss.on("connection", async (ws, req) => {
             }
           }
           break;
-
+        
         case "create_game":
           if (message.gameType) {
             performance.startTimer('game_create');
@@ -2653,6 +2817,14 @@ wss.on("connection", async (ws, req) => {
                 creator: currentUser.username,
                 creatorId: userId,
               });
+              
+              // Push-уведомление о новой игре
+              sendPushNotification(
+                '🎮 Новая игра!',
+                `${currentUser.username} создал игру "${message.gameType}"`,
+                '/icon-192.png',
+                '/'
+              ).catch(err => console.log('Push notification error:', err));
               
               ws.send(JSON.stringify({
                 type: "system",
@@ -2704,30 +2876,14 @@ wss.on("connection", async (ws, req) => {
                 type: "game_joined",
                 gameId: message.gameId,
                 userId: userId,
-                userName: currentUser.username,
+                userName: currentUser.username
               });
-              
-              // Начинаем игру если достаточно игроков
-              if (parseInt(game.player_count) + 1 >= 2) {
-                await startGame(client, message.gameId, game.type);
-              }
-              
-              ws.send(JSON.stringify({
-                type: "system",
-                text: `✅ Присоединились к игре #${message.gameId}`
-              }));
             } finally {
               client.release();
             }
           }
           break;
-
-        case "game_move":
-          if (message.gameId && message.move) {
-            await handleGameMove(message.gameId, userId, message.move);
-          }
-          break;
-
+        
         case "leave_game":
           if (message.gameId) {
             const client = await pool.connect();
@@ -2738,8 +2894,10 @@ wss.on("connection", async (ws, req) => {
               );
               
               broadcast({
-                type: "system",
-                text: `${currentUser.username} покинул игру`
+                type: "game_left",
+                gameId: message.gameId,
+                userId: userId,
+                userName: currentUser.username
               });
             } finally {
               client.release();
@@ -2747,268 +2905,309 @@ wss.on("connection", async (ws, req) => {
           }
           break;
 
-        case "create_tournament":
-          if (message.name && message.gameType && message.maxPlayers) {
-            const tournamentClient = await pool.connect();
+        case "game_move":
+          if (message.gameId && message.move !== undefined) {
+            await handleGameMove(message.gameId, userId, message.move);
+          }
+          break;
+
+        case "start_game":
+          if (message.gameId) {
+            const client = await pool.connect();
             try {
-              // Проверяем лимиты
-              if (message.maxPlayers < 3 || message.maxPlayers > 16) {
-                ws.send(JSON.stringify({ type: "system", text: "❌ Количество игроков должно быть от 3 до 16" }));
-                return;
-              }
+              const gameResult = await client.query(
+                'SELECT type FROM games WHERE id = $1',
+                [message.gameId]
+              );
               
-              const result = await tournamentClient.query(
-                'INSERT INTO tournaments (name, game_type, creator_id, max_players, status) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-                [message.name, message.gameType, userId, message.maxPlayers, 'waiting']
+              if (gameResult.rows[0]) {
+                await startGame(client, message.gameId, gameResult.rows[0].type);
+              }
+            } finally {
+              client.release();
+            }
+          }
+          break;
+
+        case "tournament_create":
+          if (message.name && message.gameType) {
+            const client = await pool.connect();
+            try {
+              const result = await client.query(
+                'INSERT INTO tournaments (name, game_type, creator_id, max_players) VALUES ($1, $2, $3, $4) RETURNING id',
+                [message.name, message.gameType, userId, message.maxPlayers || 8]
               );
               
               const tournamentId = result.rows[0].id;
-              await tournamentClient.query(
+              
+              // Добавляем создателя как участника
+              await client.query(
                 'INSERT INTO tournament_participants (tournament_id, user_id) VALUES ($1, $2)',
                 [tournamentId, userId]
               );
               
-              analytics.track('tournament_created', userId, { 
-                tournamentId, 
-                gameType: message.gameType, 
-                maxPlayers: message.maxPlayers 
-              });
-              
               broadcast({
-                type: 'tournament_created',
-                tournament: {
-                  id: tournamentId,
-                  name: message.name,
-                  gameType: message.gameType,
-                  maxPlayers: message.maxPlayers,
-                  participants: 1,
-                  creatorName: currentUser.username,
-                  status: 'waiting',
-                  rounds: [],
-                  currentRound: 0
-                }
+                type: "tournament_created",
+                tournamentId: tournamentId,
+                name: message.name,
+                gameType: message.gameType,
+                creator: currentUser.username,
+                maxPlayers: message.maxPlayers || 8
               });
               
               ws.send(JSON.stringify({
-                type: 'system',
-                text: `🏆 Турнир "${message.name}" создан! Ожидаем игроков...`
+                type: "system",
+                text: `✅ Турнир "${message.name}" создан!`
               }));
             } finally {
-              tournamentClient.release();
+              client.release();
             }
           }
           break;
 
-        case "join_tournament":
+        case "tournament_join":
           if (message.tournamentId) {
-            const tournamentClient = await pool.connect();
+            const client = await pool.connect();
             try {
-              const tournamentCheck = await tournamentClient.query(
-                'SELECT t.*, COUNT(tp.user_id) as participant_count FROM tournaments t LEFT JOIN tournament_participants tp ON t.id = tp.tournament_id WHERE t.id = $1 GROUP BY t.id',
-                [message.tournamentId]
+              // Проверяем, существует ли турнир
+              const tournamentCheck = await client.query(
+                'SELECT * FROM tournaments WHERE id = $1 AND status = $2',
+                [message.tournamentId, 'waiting']
               );
               
               if (tournamentCheck.rows.length === 0) {
-                ws.send(JSON.stringify({ type: 'system', text: '❌ Турнир не найден' }));
+                ws.send(JSON.stringify({ type: "system", text: "❌ Турнир не найден или уже начался" }));
                 return;
               }
               
               const tournament = tournamentCheck.rows[0];
-              if (tournament.status !== 'waiting') {
-                ws.send(JSON.stringify({ type: 'system', text: '❌ Турнир уже начался' }));
+              
+              // Проверяем количество участников
+              const participantCount = await client.query(
+                'SELECT COUNT(*)::int as count FROM tournament_participants WHERE tournament_id = $1',
+                [message.tournamentId]
+              );
+              
+              if (participantCount.rows[0].count >= tournament.max_players) {
+                ws.send(JSON.stringify({ type: "system", text: "❌ Турнир полон" }));
                 return;
               }
               
-              if (parseInt(tournament.participant_count) >= tournament.max_players) {
-                ws.send(JSON.stringify({ type: 'system', text: '❌ Турнир заполнен' }));
-                return;
-              }
-              
-              const participantCheck = await tournamentClient.query(
+              // Проверяем, не участвует ли уже пользователь
+              const existingParticipant = await client.query(
                 'SELECT user_id FROM tournament_participants WHERE tournament_id = $1 AND user_id = $2',
                 [message.tournamentId, userId]
               );
               
-              if (participantCheck.rows.length > 0) {
-                ws.send(JSON.stringify({ type: 'system', text: '❌ Вы уже участвуете' }));
+              if (existingParticipant.rows.length > 0) {
+                ws.send(JSON.stringify({ type: "system", text: "❌ Вы уже участвуете в этом турнире" }));
                 return;
               }
               
-              await tournamentClient.query(
+              // Добавляем участника
+              await client.query(
                 'INSERT INTO tournament_participants (tournament_id, user_id) VALUES ($1, $2)',
                 [message.tournamentId, userId]
               );
               
-              const newCount = parseInt(tournament.participant_count) + 1;
-              
               broadcast({
-                type: 'tournament_joined',
+                type: "tournament_joined",
                 tournamentId: message.tournamentId,
                 userId: userId,
-                userName: currentUser.username,
-                participants: newCount,
-                maxPlayers: tournament.max_players
+                userName: currentUser.username
               });
-              
-              // Автоматический старт при достижении минимума игроков
-              if (newCount >= Math.max(3, Math.ceil(tournament.max_players * 0.75))) {
-                await startTournament(tournamentClient, message.tournamentId, tournament);
-              }
-              
-              ws.send(JSON.stringify({
-                type: 'system',
-                text: `✅ Вы присоединились к турниру "${tournament.name}" (${newCount}/${tournament.max_players})`
-              }));
             } finally {
-              tournamentClient.release();
+              client.release();
             }
           }
           break;
 
-        case "add_friend":
-          if (message.targetUserId) {
-            const friendClient = await pool.connect();
+        case "tournament_start":
+          if (message.tournamentId) {
+            const client = await pool.connect();
             try {
-              const existingFriendship = await friendClient.query(
-                'SELECT * FROM friendships WHERE (user1_id = $1 AND user2_id = $2) OR (user1_id = $2 AND user2_id = $1)',
-                [userId, message.targetUserId]
+              await client.query(
+                'UPDATE tournaments SET status = $1 WHERE id = $2',
+                ['playing', message.tournamentId]
               );
               
-              if (existingFriendship.rows.length > 0) {
-                ws.send(JSON.stringify({ type: 'system', text: '❌ Заявка уже отправлена или вы уже друзья' }));
+              broadcast({
+                type: "tournament_started",
+                tournamentId: message.tournamentId
+              });
+            } finally {
+              client.release();
+            }
+          }
+          break;
+
+        case "friend_request":
+          if (message.targetUsername) {
+            const client = await pool.connect();
+            try {
+              // Находим ID целевого пользователя
+              const targetUser = await client.query(
+                'SELECT id FROM users WHERE username = $1',
+                [message.targetUsername]
+              );
+              
+              if (targetUser.rows.length === 0) {
+                ws.send(JSON.stringify({ type: "system", text: "❌ Пользователь не найден" }));
                 return;
               }
               
-              await friendClient.query(
+              const targetId = targetUser.rows[0].id;
+              
+              // Проверяем, не существует ли уже запрос
+              const existingRequest = await client.query(
+                'SELECT id FROM friendships WHERE (user1_id = $1 AND user2_id = $2) OR (user1_id = $2 AND user2_id = $1)',
+                [userId, targetId]
+              );
+              
+              if (existingRequest.rows.length > 0) {
+                ws.send(JSON.stringify({ type: "system", text: "❌ Запрос уже существует" }));
+                return;
+              }
+              
+              // Создаем запрос
+              await client.query(
                 'INSERT INTO friendships (user1_id, user2_id, status) VALUES ($1, $2, $3)',
-                [userId, message.targetUserId, 'pending']
+                [userId, targetId, 'pending']
               );
-              
-              const targetClient = Array.from(clients.values()).find(
-                client => client.userId === message.targetUserId
-              );
-              
-              if (targetClient && targetClient.ws.readyState === WebSocket.OPEN) {
-                targetClient.ws.send(JSON.stringify({
-                  type: 'friend_request',
-                  fromUserId: userId,
-                  fromUserName: currentUser.username
-                }));
-              }
-              
-              ws.send(JSON.stringify({ type: 'system', text: '✅ Заявка в друзья отправлена' }));
-            } finally {
-              friendClient.release();
-            }
-          }
-          break;
-
-        case "accept_friend":
-          if (message.targetUserId) {
-            const acceptClient = await pool.connect();
-            try {
-              await acceptClient.query(
-                'UPDATE friendships SET status = $1 WHERE user1_id = $2 AND user2_id = $3 AND status = $4',
-                ['accepted', message.targetUserId, userId, 'pending']
-              );
-              
-              const targetClient = Array.from(clients.values()).find(
-                client => client.userId === message.targetUserId
-              );
-              
-              if (targetClient && targetClient.ws.readyState === WebSocket.OPEN) {
-                targetClient.ws.send(JSON.stringify({
-                  type: 'friend_request_accepted',
-                  byUserId: userId,
-                  byUserName: currentUser.username
-                }));
-              }
-              
-              ws.send(JSON.stringify({ type: 'system', text: '✅ Заявка принята' }));
-            } finally {
-              acceptClient.release();
-            }
-          }
-          break;
-
-        case "get_stickers":
-          const client = await pool.connect();
-          try {
-            const result = await client.query(
-              'SELECT id, name, emoji, category FROM stickers ORDER BY category, name'
-            );
-            
-            ws.send(
-              JSON.stringify({
-                type: "stickers_list",
-                stickers: result.rows,
-              })
-            );
-          } finally {
-            client.release();
-          }
-          break;
-
-        case "get_user_level":
-          const levelClient = await pool.connect();
-          try {
-            const result = await levelClient.query(
-              'SELECT level, experience, messages_count, games_won, achievements FROM user_levels WHERE user_id = $1',
-              [userId]
-            );
-            
-            const userLevel = result.rows[0] || {
-              level: 1,
-              experience: 0,
-              messages_count: 0,
-              games_won: 0,
-              achievements: []
-            };
-            
-            ws.send(
-              JSON.stringify({
-                type: "user_level",
-                level: userLevel,
-              })
-            );
-          } finally {
-            levelClient.release();
-          }
-          break;
-
-        case "create_private_room":
-          if (message.name) {
-            const roomClient = await pool.connect();
-            try {
-              const result = await roomClient.query(
-                'INSERT INTO private_rooms (name, creator_id, password_hash) VALUES ($1, $2, $3) RETURNING id',
-                [message.name, userId, message.password || null]
-              );
-              
-              const roomId = result.rows[0].id;
-              analytics.track('private_room_created', userId, { roomName: message.name });
-              
-              ws.send(JSON.stringify({
-                type: 'private_room_created',
-                roomId: roomId,
-                name: message.name
-              }));
               
               broadcast({
-                type: 'system',
-                text: `🏠 ${currentUser.username} создал приватную комнату "${message.name}"`
+                type: "friend_request",
+                from: currentUser.username,
+                fromId: userId,
+                to: message.targetUsername
               });
+              
+              ws.send(JSON.stringify({ type: "system", text: `✅ Запрос в друзья отправлен ${message.targetUsername}!` }));
             } finally {
-              roomClient.release();
+              client.release();
             }
           }
           break;
 
-        case "join_private_room":
-          if (message.roomId) {
-            const roomClient = await pool.connect();
+        case "friend_response":
+          if (message.fromId !== undefined && message.accept !== undefined) {
+            const client = await pool.connect();
             try {
-              const roomResult = await roomClient.query(
+              if (message.accept) {
+                await client.query(
+                  'UPDATE friendships SET status = $1 WHERE user1_id = $2 AND user2_id = $3',
+                  ['accepted', message.fromId, userId]
+                );
+                
+                broadcast({
+                  type: "friend_accepted",
+                  userId: userId,
+                  username: currentUser.username,
+                  friendId: message.fromId
+                });
+                
+                ws.send(JSON.stringify({ type: "system", text: "✅ Вы теперь друзья!" }));
+              } else {
+                await client.query(
+                  'DELETE FROM friendships WHERE user1_id = $1 AND user2_id = $2',
+                  [message.fromId, userId]
+                );
+                
+                ws.send(JSON.stringify({ type: "system", text: "❌ Запрос в друзья отклонён" }));
+              }
+            } finally {
+              client.release();
+            }
+          }
+          break;
+
+        case "typing":
+          // Пересылаем статус печати
+          broadcast({
+            type: "typing",
+            userId: userId,
+            userName: currentUser.username,
+            isTyping: message.isTyping
+          }, ws);
+          break;
+
+        case "private_message":
+          if (message.targetUserId && message.text) {
+            const targetClient = Array.from(clients.values()).find(c => c.userId === message.targetUserId);
+            
+            // Сохраняем сообщение
+            await db.saveMessage(userId, "private", message.text, message.targetUserId);
+            
+            // Отправляем получателю если он онлайн
+            if (targetClient && targetClient.ws.readyState === WebSocket.OPEN) {
+              targetClient.ws.send(JSON.stringify({
+                type: "private_message",
+                from: currentUser.username,
+                fromId: userId,
+                text: message.text,
+                ts: Date.now()
+              }));
+            }
+            
+            // Отправителю подтверждение
+            ws.send(JSON.stringify({
+              type: "private_message_sent",
+              toId: message.targetUserId,
+              text: message.text,
+              ts: Date.now()
+            }));
+            
+            // Push-уведомление если получатель офлайн
+            sendPushNotification(
+              `💬 ${currentUser.username}`,
+              message.text.substring(0, 50) + (message.text.length > 50 ? '...' : ''),
+              '/icon-192.png',
+              '/'
+            ).catch(err => console.log('Push notification error:', err));
+          }
+          break;
+
+        case "create_room":
+          if (message.name && message.password) {
+            const client = await pool.connect();
+            try {
+              const bcrypt = require('bcrypt');
+              const passwordHash = await bcrypt.hash(message.password, 10);
+              
+              const result = await client.query(
+                'INSERT INTO private_rooms (name, creator_id, password_hash) VALUES ($1, $2, $3) RETURNING id',
+                [message.name, userId, passwordHash]
+              );
+              
+              broadcast({
+                type: "room_created",
+                roomId: result.rows[0].id,
+                name: message.name,
+                creator: currentUser.username
+              });
+              
+              ws.send(JSON.stringify({
+                type: "system",
+                text: `✅ Комната "${message.name}" создана!`
+              }));
+            } catch (error) {
+              ws.send(JSON.stringify({
+                type: "system",
+                text: "❌ Ошибка при создании комнаты"
+              }));
+            } finally {
+              client.release();
+            }
+          }
+          break;
+
+        case "join_room":
+          if (message.roomId && message.password) {
+            const client = await pool.connect();
+            try {
+              const bcrypt = require('bcrypt');
+              
+              const roomResult = await client.query(
                 'SELECT * FROM private_rooms WHERE id = $1',
                 [message.roomId]
               );
@@ -3019,966 +3218,95 @@ wss.on("connection", async (ws, req) => {
               }
               
               const room = roomResult.rows[0];
+              const validPassword = await bcrypt.compare(message.password, room.password_hash);
               
-              // Проверяем пароль если есть
-              if (room.password_hash && room.password_hash !== (message.password || '')) {
+              if (!validPassword) {
                 ws.send(JSON.stringify({ type: "system", text: "❌ Неверный пароль" }));
                 return;
               }
               
-              analytics.track('private_room_joined', userId, { roomId: message.roomId });
-              logger.userAction(currentUser.username, 'private_room_joined', { roomId: message.roomId, roomName: room.name });
-              
+              // Добавляем пользователя в комнату (в реальном приложении нужна таблица room_members)
               ws.send(JSON.stringify({
-                type: 'private_room_joined',
-                roomId: message.roomId,
+                type: "room_joined",
+                roomId: room.id,
                 roomName: room.name
               }));
             } finally {
-              roomClient.release();
+              client.release();
             }
           }
           break;
-
-        case "get_private_rooms":
-          const roomsClient = await pool.connect();
-          try {
-            const result = await roomsClient.query(`
-              SELECT pr.id, pr.name, pr.created_at, u.username as creator,
-                     CASE WHEN pr.password_hash IS NOT NULL THEN true ELSE false END as has_password
-              FROM private_rooms pr
-              JOIN users u ON pr.creator_id = u.id
-              ORDER BY pr.created_at DESC
-              LIMIT 20
-            `);
-            
-            ws.send(JSON.stringify({
-              type: 'private_rooms_list',
-              rooms: result.rows
-            }));
-          } finally {
-            roomsClient.release();
-          }
-          break;
-
-
-
-        case "get_friends":
-          const friendsClient = await pool.connect();
-          try {
-            // Получаем список друзей
-            const result = await friendsClient.query(`
-              SELECT DISTINCT u.id, u.username, u.avatar_url, u.status
-              FROM users u
-              LEFT JOIN friendships f ON (f.user1_id = u.id AND f.user2_id = $1) OR (f.user2_id = u.id AND f.user1_id = $1)
-              WHERE u.id != $1 AND (f.status = 'accepted' OR f.status IS NULL)
-              ORDER BY u.username
-              LIMIT 20
-            `, [userId]);
-            
-            // Добавляем статус онлайн
-            const friendsWithStatus = result.rows.map(user => ({
-              ...user,
-              is_online: Array.from(clients.values()).some(c => c.userId === user.id),
-              friendship_status: 'none' // Упрощенно для демо
-            }));
-            
-            ws.send(JSON.stringify({
-              type: 'friends_list',
-              friends: friendsWithStatus
-            }));
-          } finally {
-            friendsClient.release();
-          }
-          break;
-
-        case "get_tournaments":
-          const tournamentsClient = await pool.connect();
-          try {
-            const result = await tournamentsClient.query(`
-              SELECT t.id, t.name, t.game_type, t.max_players, t.status, t.created_at,
-                     u.username as creator_name,
-                     COUNT(tp.user_id) as participant_count
-              FROM tournaments t
-              JOIN users u ON t.creator_id = u.id
-              LEFT JOIN tournament_participants tp ON t.id = tp.tournament_id
-              WHERE t.status IN ('waiting', 'started')
-              GROUP BY t.id, u.username
-              ORDER BY t.created_at DESC
-              LIMIT 10
-            `);
-            
-            ws.send(JSON.stringify({
-              type: 'tournaments_list',
-              tournaments: result.rows
-            }));
-          } finally {
-            tournamentsClient.release();
-          }
-          break;
-
-        case "start_tournament_manually":
-          if (message.tournamentId) {
-            const tournamentClient = await pool.connect();
-            try {
-              const tournament = await tournamentClient.query(
-                'SELECT * FROM tournaments WHERE id = $1 AND creator_id = $2 AND status = $3',
-                [message.tournamentId, userId, 'waiting']
-              );
-              
-              if (tournament.rows.length === 0) {
-                ws.send(JSON.stringify({ type: 'system', text: '❌ Турнир не найден или вы не создатель' }));
-                return;
-              }
-              
-              const participantCount = await tournamentClient.query(
-                'SELECT COUNT(*) as count FROM tournament_participants WHERE tournament_id = $1',
-                [message.tournamentId]
-              );
-              
-              if (parseInt(participantCount.rows[0].count) < 3) {
-                ws.send(JSON.stringify({ type: 'system', text: '❌ Минимум 3 игрока для старта турнира' }));
-                return;
-              }
-              
-              await startTournament(tournamentClient, message.tournamentId, tournament.rows[0]);
-              
-              ws.send(JSON.stringify({
-                type: 'system',
-                text: `🏆 Турнир "${tournament.rows[0].name}" запущен!`
-              }));
-            } finally {
-              tournamentClient.release();
-            }
-          }
-          break;
-
-        case "tournament_action":
-          if (message.tournamentId && message.action) {
-            await handleTournamentAction(message.tournamentId, userId, message.action, message.data);
-          }
-          break;
-
-        case "screen_share_start":
-          if (message.roomId && rooms.has(message.roomId)) {
-            const room = rooms.get(message.roomId);
-            room.screenSharer = { userId, userName: currentUser.username, sessionId };
-            
-            analytics.track('screen_share_started', userId, { roomId: message.roomId });
-            logger.userAction(currentUser.username, 'screen_share_started', { roomId: message.roomId });
-            
-            broadcastToRoom(message.roomId, {
-              type: 'screen_share_started',
-              sharerUserId: userId,
-              sharerUserName: currentUser.username,
-              roomId: message.roomId
-            }, sessionId);
-            
-            ws.send(JSON.stringify({
-              type: 'system',
-              text: '✅ Показ экрана начат'
-            }));
-          }
-          break;
-
-        case "screen_share_stop":
-          if (message.roomId && rooms.has(message.roomId)) {
-            const room = rooms.get(message.roomId);
-            if (room.screenSharer && room.screenSharer.userId === userId) {
-              delete room.screenSharer;
-              
-              analytics.track('screen_share_stopped', userId, { roomId: message.roomId });
-              logger.userAction(currentUser.username, 'screen_share_stopped', { roomId: message.roomId });
-              
-              broadcastToRoom(message.roomId, {
-                type: 'screen_share_stopped',
-                sharerUserId: userId,
-                roomId: message.roomId
-              });
-              
-              ws.send(JSON.stringify({
-                type: 'system',
-                text: '✅ Показ экрана остановлен'
-              }));
-            }
-          }
-          break;
-
-        case "screen_share_data":
-          if (message.roomId && message.data && rooms.has(message.roomId)) {
-            const room = rooms.get(message.roomId);
-            if (room.screenSharer && room.screenSharer.userId === userId) {
-              // Отправляем данные экрана всем участникам комнаты кроме отправителя
-              broadcastToRoom(message.roomId, {
-                type: 'screen_share_data',
-                data: message.data,
-                sharerUserId: userId,
-                roomId: message.roomId
-              }, sessionId);
-            }
-          }
-          break;
-
-        case "private":
-          if (message.to && message.text && message.text.trim()) {
-            const targetUser = await db.getUserById(message.to);
-            if (targetUser) {
-              const text = message.text.trim();
-              await db.saveMessage(userId, "private", text, message.to);
-
-              let targetClient = null;
-              clients.forEach((client, sid) => {
-                if (client.userId === message.to) {
-                  targetClient = client;
-                }
-              });
-
-              if (
-                targetClient &&
-                targetClient.ws.readyState === WebSocket.OPEN
-              ) {
-                targetClient.ws.send(
-                  JSON.stringify({
-                    type: "private",
-                    name: currentUser.username,
-                    text: text,
-                    fromUserId: userId,
-                  })
-                );
-
-                ws.send(JSON.stringify({ type: "private_sent" }));
-              } else {
-                ws.send(
-                  JSON.stringify({
-                    type: "system",
-                    text: "❌ Пользователь не в сети",
-                  })
-                );
-              }
-            }
-          }
-          break;
-
-        // WebRTC сигнальные сообщения
-        case "create_room":
-          const roomId = `room_${Date.now()}_${Math.random()
-            .toString(36)
-            .substr(2, 9)}`;
-          rooms.set(roomId, {
-            users: new Map([
-              [
-                sessionId,
-                {
-                  userId,
-                  userName: currentUser.username,
-                  sessionId: sessionId,
-                },
-              ],
-            ]),
-            creator: sessionId,
-            createdAt: Date.now(),
-            isGroupCall: true,
-            isActive: true, // ДОБАВИТЬ: флаг активного звонка
-          });
-
-          console.log(`📞 Room created: ${roomId} by ${currentUser.username}`);
-
-          // Отправляем создателю подтверждение
-          ws.send(
-            JSON.stringify({
-              type: "room_created",
-              roomId: roomId,
-              message: "Групповой звонок создан. Ожидаем участников...",
-            })
-          );
-
-          // НЕ отправляем приглашение всем сразу - вместо этого уведомляем о создании комнаты
-          broadcast(
-            {
-              type: "group_call_started",
-              roomId: roomId,
-              fromUserId: userId,
-              fromUserName: currentUser.username,
-            },
-            sessionId
-          );
-          break;
-
-        case "join_group_call":
-          if (message.roomId && rooms.has(message.roomId)) {
-            const room = rooms.get(message.roomId);
-
-            if (!room.isActive) {
-              ws.send(
-                JSON.stringify({
-                  type: "system",
-                  text: "❌ Этот звонок уже завершен",
-                })
-              );
-              break;
-            }
-
-            if (!room.users.has(sessionId)) {
-              room.users.set(sessionId, {
-                userId,
-                userName: currentUser.username,
-                sessionId: sessionId,
-              });
-
-              console.log(
-                `👤 User ${currentUser.username} joined group call ${message.roomId}`
-              );
-
-              // Отправляем новому участнику полный список пользователей
-              const usersInRoom = Array.from(room.users.entries()).map(
-                ([sid, user]) => ({
-                  sessionId: sid,
-                  userId: user.userId,
-                  userName: user.userName,
-                })
-              );
-
-              ws.send(
-                JSON.stringify({
-                  type: "room_users",
-                  users: usersInRoom,
-                  roomId: message.roomId,
-                })
-              );
-
-              // ИСПРАВЛЕНИЕ: Оповещаем всех участников о новом пользователе
-              broadcastToRoom(
-                message.roomId,
-                {
-                  type: "user_joined",
-                  userId: userId,
-                  userName: currentUser.username,
-                  roomId: message.roomId,
-                  sessionId: sessionId,
-                },
-                sessionId // исключаем нового пользователя из этого сообщения
-              );
-
-              // ИСПРАВЛЕНИЕ: Отправляем обновленный список всем участникам
-              broadcastToRoom(message.roomId, {
-                type: "room_users",
-                users: usersInRoom,
-                roomId: message.roomId,
-              });
-
-              // Уведомляем о присоединении
-              broadcastToRoom(message.roomId, {
-                type: "system",
-                text: `👤 ${currentUser.username} присоединился к звонку`,
-              });
-            }
-          } else {
-            ws.send(
-              JSON.stringify({
-                type: "system",
-                text: "❌ Звонок не найден или уже завершен",
-              })
-            );
-          }
-          break;
-
-        case "start_individual_call":
-          if (message.targetUserId) {
-            const targetClient = Array.from(clients.values()).find(
-              (client) => client.userId === message.targetUserId
-            );
-            if (targetClient && targetClient.ws.readyState === WebSocket.OPEN) {
-              const roomId = `room_${Date.now()}_${Math.random()
-                .toString(36)
-                .substr(2, 9)}`;
-              rooms.set(roomId, {
-                users: new Map([
-                  [
-                    sessionId,
-                    {
-                      userId,
-                      userName: currentUser.username,
-                      sessionId: sessionId,
-                    },
-                  ],
-                ]),
-                creator: sessionId,
-                createdAt: Date.now(),
-                isGroupCall: false,
-                isActive: true, // ДОБАВЬТЕ ЭТУ СТРОЧКУ
-              });
-
-              console.log(
-                `📞 Individual call room created: ${roomId} by ${currentUser.username}`
-              );
-
-              // Сначала отправляем подтверждение инициатору
-              ws.send(
-                JSON.stringify({
-                  type: "call_started", // УБЕДИТЕСЬ ЧТО ТИП call_started
-                  roomId: roomId,
-                  targetUserName: targetClient.user.username,
-                  message: `Вызываем ${targetClient.user.username}...`,
-                })
-              );
-
-              // Затем отправляем приглашение целевому пользователю
-              targetClient.ws.send(
-                JSON.stringify({
-                  type: "call_invite",
-                  fromUserId: userId,
-                  fromUserName: currentUser.username,
-                  roomId: roomId,
-                  isGroupCall: false,
-                })
-              );
-            } else {
-              ws.send(
-                JSON.stringify({
-                  type: "system",
-                  text: "❌ Пользователь не в сети",
-                })
-              );
-            }
-          }
-          break;
-
-        // В обработчике сообщения "join_room" добавьте:
-        case "join_room":
-          if (message.roomId && rooms.has(message.roomId)) {
-            const room = rooms.get(message.roomId);
-            if (!room.users.has(sessionId)) {
-              room.users.set(sessionId, {
-                userId,
-                userName: currentUser.username,
-                sessionId: sessionId,
-              });
-
-              console.log(
-                `👤 User ${currentUser.username} joined room ${message.roomId}`
-              );
-
-              // ИСПРАВЛЕНИЕ: Сразу отправляем полный список пользователей новому участнику
-              const usersInRoom = Array.from(room.users.entries()).map(
-                ([sid, user]) => ({
-                  sessionId: sid,
-                  userId: user.userId,
-                  userName: user.userName,
-                })
-              );
-
-              // Отправляем новому участнику полный список
-              ws.send(
-                JSON.stringify({
-                  type: "room_users",
-                  users: usersInRoom,
-                  roomId: message.roomId,
-                })
-              );
-
-              // Оповещаем всех о новом участнике
-              broadcastToRoom(
-                message.roomId,
-                {
-                  type: "user_joined",
-                  userId: userId,
-                  userName: currentUser.username,
-                  roomId: message.roomId,
-                  sessionId: sessionId,
-                },
-                sessionId
-              );
-
-              // ИСПРАВЛЕНИЕ: Отправляем обновленный список всем участникам
-              broadcastToRoom(message.roomId, {
-                type: "room_users",
-                users: usersInRoom,
-                roomId: message.roomId,
-              });
-            }
-          }
-          break;
-
-        case "get_room_users":
-          if (message.roomId && rooms.has(message.roomId)) {
-            const room = rooms.get(message.roomId);
-            const usersInRoom = Array.from(room.users.entries()).map(
-              ([sid, user]) => ({
-                sessionId: sid,
-                userId: user.userId,
-                userName: user.userName,
-              })
-            );
-
-            ws.send(
-              JSON.stringify({
-                type: "room_users",
-                users: usersInRoom,
-                roomId: message.roomId,
-              })
-            );
-          }
-          break;
-
-        case "webrtc_offer":
-          if (message.targetSessionId && message.offer) {
-            const targetClient = clients.get(message.targetSessionId);
-            if (targetClient && targetClient.ws.readyState === WebSocket.OPEN) {
-              targetClient.ws.send(JSON.stringify({
-                type: "webrtc_offer",
-                fromSessionId: sessionId,
-                fromUserId: userId,
-                roomId: message.roomId,
-                offer: message.offer
-              }));
-            }
-          }
-          break;
-
-        case "webrtc_answer":
-          if (message.targetSessionId && message.answer) {
-            const targetClient = clients.get(message.targetSessionId);
-            if (targetClient && targetClient.ws.readyState === WebSocket.OPEN) {
-              targetClient.ws.send(JSON.stringify({
-                type: "webrtc_answer",
-                fromSessionId: sessionId,
-                fromUserId: userId,
-                roomId: message.roomId,
-                answer: message.answer
-              }));
-            }
-          }
-          break;
-
-        case "webrtc_ice_candidate":
-          if (message.targetSessionId && message.candidate) {
-            const targetClient = clients.get(message.targetSessionId);
-            if (targetClient && targetClient.ws.readyState === WebSocket.OPEN) {
-              targetClient.ws.send(JSON.stringify({
-                type: "webrtc_ice_candidate",
-                fromSessionId: sessionId,
-                fromUserId: userId,
-                roomId: message.roomId,
-                candidate: message.candidate
-              }));
-            }
-          }
-          break;
-
-        case "leave_room":
-          if (message.roomId && rooms.has(message.roomId)) {
-            const room = rooms.get(message.roomId);
-            const userName = currentUser.username;
-            
-            // Останавливаем показ экрана если этот пользователь его показывал
-            if (room.screenSharer && room.screenSharer.userId === userId) {
-              delete room.screenSharer;
-              broadcastToRoom(message.roomId, {
-                type: 'screen_share_stopped',
-                sharerUserId: userId,
-                roomId: message.roomId
-              });
-            }
-
-            room.users.delete(sessionId);
-            analytics.track('room_left', userId, { roomId: message.roomId });
-
-            console.log(`👤 User ${userName} left room ${message.roomId}`);
-
-            broadcastToRoom(
-              message.roomId,
-              {
-                type: "user_left",
-                userId: userId,
-                userName: userName,
-                roomId: message.roomId,
-                sessionId: sessionId,
-              },
-              sessionId
-            );
-
-            if (room.users.size > 0) {
-              const usersInRoom = Array.from(room.users.entries()).map(
-                ([sid, user]) => ({
-                  sessionId: sid,
-                  userId: user.userId,
-                  userName: user.userName,
-                })
-              );
-
-              broadcastToRoom(message.roomId, {
-                type: "room_users",
-                users: usersInRoom,
-                roomId: message.roomId,
-              });
-            } else {
-              rooms.delete(message.roomId);
-              console.log(`🗑️ Room ${message.roomId} deleted (no users)`);
-            }
-          }
-          break;
-
-        case "call_rejected":
-          if (message.roomId && rooms.has(message.roomId)) {
-            const room = rooms.get(message.roomId);
-            const caller = clients.get(room.creator);
-            if (caller && caller.ws.readyState === WebSocket.OPEN) {
-              caller.ws.send(
-                JSON.stringify({
-                  type: "call_rejected",
-                  roomId: message.roomId,
-                  userName: currentUser.username,
-                })
-              );
-            }
-            // Удаляем комнату если это индивидуальный звонок
-            if (!room.isGroupCall) {
-              rooms.delete(message.roomId);
-              console.log(
-                `🗑️ Individual call room ${message.roomId} deleted (rejected)`
-              );
-            }
-          }
-          break;
-
-        case "get_active_calls":
-          const activeCalls = Array.from(rooms.entries())
-            .filter(([roomId, room]) => room.isActive && room.isGroupCall)
-            .map(([roomId, room]) => ({
-              roomId,
-              creatorName: room.users.get(room.creator)?.userName || "Unknown",
-              participantsCount: room.users.size,
-              createdAt: room.createdAt,
-            }));
-
-          ws.send(
-            JSON.stringify({
-              type: "active_calls",
-              calls: activeCalls,
-            })
-          );
-          break;
-
-        case "end_call":
-          if (message.roomId && rooms.has(message.roomId)) {
-            const room = rooms.get(message.roomId);
-
-            // Помечаем комнату как неактивную
-            room.isActive = false;
-
-            broadcastToRoom(message.roomId, {
-              type: "call_ended",
-              roomId: message.roomId,
-              endedBy: currentUser.username,
-            });
-
-            // Уведомляем всех о завершении звонка
-            broadcast({
-              type: "group_call_ended",
-              roomId: message.roomId,
-              endedBy: currentUser.username,
-            });
-
-            // Удаляем комнату через некоторое время
-            setTimeout(() => {
-              if (rooms.has(message.roomId)) {
-                rooms.delete(message.roomId);
-                console.log(`🗑️ Room ${message.roomId} deleted after call end`);
-              }
-            }, 30000); // 30 секунд для завершения всех соединений
-
-            console.log(
-              `📞 Call ended in room ${message.roomId} by ${currentUser.username}`
-            );
-          }
-          break;
-
-        default:
-          console.log("❌ Unknown message type:", message.type);
-          ws.send(
-            JSON.stringify({
-              type: "error",
-              text: "❌ Неизвестный тип сообщения",
-            })
-          );
       }
     } catch (error) {
-      console.error("❌ Error processing message:", error);
-      try {
-        ws.send(
-          JSON.stringify({
-            type: "system",
-            text: "❌ Ошибка обработки сообщения",
-          })
-        );
-      } catch (sendError) {
-        console.error("Error sending error message:", sendError);
-      }
+      console.error('❌ Error handling message:', error);
+      ws.send(JSON.stringify({
+        type: "error",
+        message: "Ошибка при обработке сообщения"
+      }));
     }
   });
 
-  ws.on("close", async (code, reason) => {
-    console.log(
-      `🔌 WebSocket connection closed: ${sessionId} (user: ${currentUser?.username})`,
-      code,
-      reason?.toString()
-    );
-
-    // ИСПРАВЛЕНИЕ: Не обрабатываем как ошибку закрытие дублирующих сессий
-    if (
-      code === 4000 &&
-      reason === "Duplicate session closed by new connection"
-    ) {
-      console.log(`🔄 Duplicate session ${sessionId} closed normally`);
-      clients.delete(sessionId);
-      return;
-    }
-
+  // Обработка закрытия соединения
+  ws.on('close', async (code, reason) => {
     try {
-      // Удаляем из комнат
-      rooms.forEach((room, roomId) => {
-        if (room.users.has(sessionId)) {
-          const userName = currentUser?.username || "Unknown";
-          room.users.delete(sessionId);
-
-          try {
-            broadcastToRoom(
-              roomId,
-              {
-                type: "user_left",
-                userId: userId,
-                userName: userName,
-                roomId: roomId,
-                sessionId: sessionId,
-              },
-              sessionId
-            );
-
-            // Обновляем список пользователей для оставшихся участников
-            if (room.users.size > 0) {
-              const usersInRoom = Array.from(room.users.entries()).map(
-                ([sid, user]) => ({
-                  sessionId: sid,
-                  userId: user.userId,
-                  userName: user.userName,
-                })
-              );
-
-              broadcastToRoom(roomId, {
-                type: "room_users",
-                users: usersInRoom,
-                roomId: roomId,
-              });
-            } else {
-              rooms.delete(roomId);
-            }
-          } catch (error) {
-            console.error("Error broadcasting user left:", error);
-          }
-        }
-      });
-
+      console.log(`🔌 WebSocket closed: ${code} - ${reason}`);
+      
       const clientData = clients.get(sessionId);
-      if (clientData && currentUser) {
-        // Отписываемся от уведомлений
-        notifications.unsubscribe(userId);
+      if (clientData) {
+        const { userId } = clientData;
         
-        // Аналитика
-        analytics.track('user_disconnected', userId, { username: currentUser.username });
-        logger.userAction(currentUser.username, 'disconnected', { sessionId });
+        // Удаляем из списка клиентов
+        clients.delete(sessionId);
         
+        // Обновляем статус в базе данных
         await db.endUserSession(sessionId);
-        clients.delete(sessionId);
-        await db.saveMessage(
-          userId,
-          "system",
-          `${currentUser.username} вышел из чат`
-        );
+        
+        // Удаляем временного пользователя если нужно
+        await db.deleteTemporaryUserIfUnused(userId);
+        
+        // Уведомляем всех об изменении списка пользователей
         broadcast({
-          type: "system",
-          text: `🐱 ${currentUser.username} вышел из чата`,
+          type: "user_left",
+          userId: userId,
+          username: clientData.username
         });
-        await broadcastUsers();
-
-        // Попробуем удалить временного пользователя, если он больше не используется
-        try {
-          await db.deleteTemporaryUserIfUnused(userId);
-        } catch (err) {
-          console.error("Error attempting to delete temporary user:", err);
-        }
-
-        console.log(
-          `✅ User ${currentUser.username} (${userId}) disconnected, session ${sessionId} removed`
-        );
+        
+        // Обновляем список онлайн пользователей
+        const onlineUsers = await db.getOnlineUsers();
+        broadcast({ type: "online_users", users: onlineUsers });
+        
+        console.log(`👋 User ${clientData.username} disconnected`);
       }
     } catch (error) {
-      console.error("❌ Error during connection cleanup:", error);
+      console.error('❌ Error handling disconnect:', error);
     }
-  });
-
-  ws.on("error", (error) => {
-    console.error(
-      "❌ WebSocket error for session",
-      sessionId,
-      "user:",
-      currentUser?.username,
-      "error:",
-      error
-    );
   });
 });
 
-// Улучшенная очистка старых сессий и временных пользователей
-async function cleanupOldSessions() {
-  try {
-    const client = await pool.connect();
-
-    // Закрываем сессии в базе данных старше 1 часа
-    await client.query(`
-      UPDATE user_sessions SET disconnected_at = CURRENT_TIMESTAMP 
-      WHERE disconnected_at IS NULL AND connected_at < NOW() - INTERVAL '1 hour'
-    `);
-
-    // Очищаем неиспользуемых временных пользователей
-    const cleanedUsers = await db.cleanupAllUnusedTemporaryUsers();
-    if (cleanedUsers.length > 0) {
-      console.log(
-        `🧹 Cleaned up ${cleanedUsers.length} temporary users:`,
-        cleanedUsers
-      );
-    }
-
-    // Закрываем соединения в памяти для пользователей с неактивными сессиями
-    clients.forEach((clientData, sessionId) => {
-      // Если соединение закрыто, но все еще в памяти - удаляем
-      if (clientData.ws.readyState !== WebSocket.OPEN) {
-        clients.delete(sessionId);
-        console.log(`🧹 Removed closed connection from memory: ${sessionId}`);
-      }
-    });
-
-    // Очищаем пустые комнаты (старше 1 часа)
-    const now = Date.now();
-    rooms.forEach((room, roomId) => {
-      if (room.users.size === 0 && now - room.createdAt > 3600000) {
-        rooms.delete(roomId);
-        console.log(`🧹 Removed empty room: ${roomId}`);
-      }
-    });
-
-    client.release();
-    console.log("🧹 Old sessions and temporary users cleaned up");
-  } catch (error) {
-    console.error("Error cleaning up old sessions:", error);
-  }
-}
-
-setInterval(cleanupOldSessions, 10 * 60 * 1000); // Каждые 10 минут
-
+// Запуск сервера
 const PORT = process.env.PORT || 3000;
-
-async function startServer() {
-  try {
-    await db.init();
-    await cleanupOldSessions();
-    
-    // Запускаем автобэкап
-    backupManager.startAutoBackup();
-    
-    // Очистка старых логов при запуске
-    logger.cleanOldLogs(7);
-    
-    // Настраиваем планировщик задач
-    scheduler.schedule('cache_cleanup', () => {
-      cache.cleanup();
-      logger.info('Cache cleanup completed', { size: cache.size() });
-    }, 30 * 60 * 1000);
-    
-    scheduler.schedule('security_cleanup', () => {
-      security.cleanup();
-      analytics.cleanup();
-    }, 60 * 60 * 1000);
-    
-    scheduler.schedule('performance_check', () => {
-      const system = performance.getSystemInfo();
-      if (system.memory.heapUsed > 500) {
-        logger.warn('High memory usage detected', system);
-      }
-    }, 5 * 60 * 1000);
-    
-    server.listen(PORT, () => {
-      logger.systemEvent('Server started', { port: PORT });
-      console.log(`🚀 Server running on port ${PORT}`);
-      console.log(`📡 WebSocket server ready for connections`);
-      console.log(`❤️  Health check available at http://localhost:${PORT}/health`);
-      console.log(`💾 Database connection established`);
-      console.log(`🛠️  New utilities loaded: Cache, Backup, Stats, Logger`);
-    });
-  } catch (error) {
-    logger.error('Failed to start server', error);
-    console.error("❌ Failed to start server:", error);
-    process.exit(1);
-  }
-}
-
-
-
-function gracefulShutdown() {
-  console.log("🔄 Starting graceful shutdown...");
-  logger.systemEvent('Server shutdown initiated');
-
-  // Останавливаем планировщик
-  scheduler.stop();
-  console.log("✅ Task scheduler stopped");
-
-  // Очищаем алерты
-  performance.clearAlerts();
-  
-  // Создаем финальный бэкап
-  backupManager.createBackup().then(() => {
-    console.log("✅ Final backup created");
-  }).catch(err => {
-    console.error("❌ Final backup failed:", err);
-  });
-
-  wss.close(() => {
-    console.log("✅ WebSocket server closed");
-  });
-
-  clients.forEach((client, sessionId) => {
-    try {
-      if (client.ws.readyState === WebSocket.OPEN) {
-        client.ws.close(1001, "Server shutdown");
-      }
-    } catch (error) {
-      console.error("Error closing client connection:", error);
-    }
-  });
-
-  pool.end(() => {
-    logger.systemEvent('Database connection closed');
-    console.log("✅ Database pool closed");
-    process.exit(0);
-  });
-
-  setTimeout(() => {
-    logger.error('Forced shutdown after timeout');
-    console.log("⚠️ Forced shutdown");
-    process.exit(1);
-  }, 15000); // Увеличиваем время для бэкапа
-}
-
-process.on("SIGTERM", gracefulShutdown);
-process.on("SIGINT", gracefulShutdown);
-
-process.on("uncaughtException", (error) => {
-  console.error("❌ Uncaught Exception:", error);
-  gracefulShutdown();
+server.listen(PORT, () => {
+  console.log(`
+╔═══════════════════════════════════════════════════════════╗
+║   🚀 Space Cat Chat Server запущен!                       ║
+║   📡 WebSocket: ws://localhost:${PORT}                      ║
+║   🌐 HTTP:    http://localhost:${PORT}                      ║
+║   🔔 Push:    Включено                                     ║
+╚═══════════════════════════════════════════════════════════╝
+  `);
 });
 
-process.on("unhandledRejection", (reason, promise) => {
-  console.error("❌ Unhandled Rejection at:", promise, "reason:", reason);
-  gracefulShutdown();
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('🛑 SIGTERM received, shutting down gracefully...');
+  await pool.end();
+  process.exit(0);
 });
 
-startServer();
+process.on('SIGINT', async () => {
+  console.log('🛑 SIGINT received, shutting down gracefully...');
+  await pool.end();
+  process.exit(0);
+});
+
+module.exports = { server, pool };

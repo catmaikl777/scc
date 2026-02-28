@@ -2459,6 +2459,14 @@
             📞 Завершить звонок
           </button>
         </div>
+        
+        <!-- Push-уведомления -->
+        <div id="pushSettings" style="padding: 15px; border-top: 1px solid var(--border-color); margin-top: 10px;">
+          <button id="enablePushBtn" class="call-btn" style="width: 100%; background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+            🔔 Включить уведомления
+          </button>
+          <div id="pushStatus" style="margin-top: 8px; font-size: 12px; color: var(--text-muted); text-align: center;"></div>
+        </div>
       </aside>
 
       <div class="overlay" id="overlay"></div>
@@ -2710,6 +2718,7 @@
     </script>
 
     <script src="notifications.js"></script>
+    <script src="push-client.js"></script>
     <script src="client.js"></script>
     <script>
       // Дополнительные функции для игр
