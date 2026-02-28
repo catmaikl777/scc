@@ -1767,7 +1767,23 @@ async function handleGameEnd(gameId, winnerId) {
 
 // HTTP сервер
 const server = http.createServer(async (req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", "https://cosmocatchat277.netlify.app/");
+  // Разрешаем несколько доменов для CORS
+  const allowedOrigins = [
+    "https://cosmocatchat277.netlify.app/",
+    "https://scc-one-pi.vercel.app",
+    "http://localhost:3000"
+  ];
+  const origin = req.headers.origin || "";
+  
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  } else if (allowedOrigins.some(o => origin.includes(o.replace("https://", "").replace("http://", "")))) {
+    // Для частичных совпадений (subdomains)
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  } else {
+    res.setHeader("Access-Control-Allow-Origin", allowedOrigins[0]);
+  }
+
   res.setHeader(
     "Access-Control-Allow-Methods",
     "GET, POST, OPTIONS, PUT, DELETE"
