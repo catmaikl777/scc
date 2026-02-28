@@ -1,0 +1,24 @@
+{
+  "name": "space-cat-chat",
+  "version": "1.5.1",
+  "description": "WebSocket чат с локальными утилитами и автобэкапами",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "build": "echo \"No build step\""
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.4.4",
+    "@capacitor/cli": "^7.4.4",
+    "@capacitor/core": "^7.4.4",
+    "pg": "^8.11.3",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "main": "server.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

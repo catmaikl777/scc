@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест видеозвонков</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #0a0a1a;
+            color: white;
+            padding: 20px;
+        }
+        .test-container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .test-section {
+            background: #15152b;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 12px;
+            border: 1px solid #8b5cf6;
+        }
+        button {
+            background: #8b5cf6;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #7c3aed;
+        }
+        video {
+            width: 300px;
+            height: 200px;
+            background: #1e1e3f;
+            border-radius: 8px;
+            margin: 10px;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 8px;
+        }
+        .success { background: #10b981; }
+        .error { background: #ef4444; }
+        .warning { background: #f59e0b; }
+        .info { background: #06b6d4; }
+        pre {
+            background: #1e1e3f;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>🎥 Тест видеозвонков</h1>
+        
+        <div class="test-section">
+            <h2>1. Проверка поддержки WebRTC</h2>
+            <div id="webrtc-support"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>2. Тест доступа к камере и микрофону</h2>
+            <button onclick="testMediaAccess()">Проверить доступ к медиа</button>
+            <div id="media-status"></div>
+            <video id="testVideo" autoplay muted playsinline></video>
+        </div>
+
+        <div class="test-section">
+            <h2>3. Список доступных устройств</h2>
+            <button onclick="listDevices()">Показать устройства</button>
+            <div id="devices-list"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>4. Тест WebSocket соединения</h2>
+            <button onclick="testWebSocket()">Проверить WebSocket</button>
+            <div id="websocket-status"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>5. Тест создания PeerConnection</h2>
+            <button onclick="testPeerConnection()">Создать PeerConnection</button>
+            <div id="peer-status"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>6. Диагностика основного приложения</h2>
+            <button onclick="debugMainApp()">Проверить основное приложение</button>
+            <div id="main-app-status"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>7. Логи</h2>
+            <button onclick="clearLogs()">Очистить логи</button>
+            <pre id="logs"></pre>
+        </div>
+    </div>
+
+    <script>
+        let logs = [];
+        
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = `[${timestamp}] ${message}`;
+            logs.push(logEntry);
+            
+            const logsElement = document.getElementById('logs');
+            logsElement.textContent = logs.join('\n');
+            logsElement.scrollTop = logsElement.scrollHeight;
+            
+            console.log(logEntry);
+        }
+
+        function showStatus(elementId, message, type = 'info') {
+            const element = document.getElementById(elementId);
+            element.innerHTML = `<div class="status ${type}">${message}</div>`;
+        }
+
+        function clearLogs() {
+            logs = [];
+            document.getElementById('logs').textContent = '';
+        }
+
+        // 1. Проверка поддержки WebRTC
+        function checkWebRTCSupport() {
+            const support = {
+                getUserMedia: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+                RTCPeerConnection: !!window.RTCPeerConnection,
+                WebSocket: !!window.WebSocket,
+                enumerateDevices: !!(navigator.mediaDevices && navigator.mediaDevices.enumerateDevices)
+            };
+
+            let html = '<ul>';
+            for (const [feature, supported] of Object.entries(support)) {
+                const status = supported ? '✅' : '❌';
+                const color = supported ? 'success' : 'error';
+                html += `<li><span class="status ${color}">${status} ${feature}</span></li>`;
+            }
+            html += '</ul>';
+
+            document.getElementById('webrtc-support').innerHTML = html;
+            log(`WebRTC Support: ${JSON.stringify(support)}`);
+        }
+
+        // 2. Тест доступа к медиа
+        async function testMediaAccess() {
+            try {
+                log('Запрашиваем доступ к камере и микрофону...');
+                showStatus('media-status', 'Запрашиваем разрешения...', 'warning');
+
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: { ideal: 640 },
+                        height: { ideal: 480 },
+                        frameRate: { ideal: 15 }
+                    },
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true
+                    }
+                });
+
+                const video = document.getElementById('testVideo');
+                video.srcObject = stream;
+
+                const videoTracks = stream.getVideoTracks();
+                const audioTracks = stream.getAudioTracks();
+
+                showStatus('media-status', 
+                    `✅ Доступ получен! Видео: ${videoTracks.length}, Аудио: ${audioTracks.length}`, 
+                    'success'
+                );
+
+                log(`Медиа поток получен: ${videoTracks.length} видео треков, ${audioTracks.length} аудио треков`);
+                
+                // Показываем информацию о треках
+                videoTracks.forEach((track, i) => {
+                    log(`Видео трек ${i}: ${track.label}, ${track.kind}, enabled: ${track.enabled}`);
+                });
+                
+                audioTracks.forEach((track, i) => {
+                    log(`Аудио трек ${i}: ${track.label}, ${track.kind}, enabled: ${track.enabled}`);
+                });
+
+            } catch (error) {
+                showStatus('media-status', `❌ Ошибка: ${error.message}`, 'error');
+                log(`Ошибка доступа к медиа: ${error.name} - ${error.message}`);
+            }
+        }
+
+        // 3. Список устройств
+        async function listDevices() {
+            try {
+                log('Получаем список устройств...');
+                
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                
+                let html = '<ul>';
+                devices.forEach((device, i) => {
+                    html += `<li>${device.kind}: ${device.label || `Устройство ${i + 1}`} (ID: ${device.deviceId.substring(0, 8)}...)</li>`;
+                    log(`Устройство: ${device.kind} - ${device.label || 'Без названия'}`);
+                });
+                html += '</ul>';
+
+                document.getElementById('devices-list').innerHTML = html;
+                log(`Найдено устройств: ${devices.length}`);
+
+            } catch (error) {
+                showStatus('devices-list', `❌ Ошибка: ${error.message}`, 'error');
+                log(`Ошибка получения устройств: ${error.message}`);
+            }
+        }
+
+        // 4. Тест WebSocket
+        function testWebSocket() {
+            log('Тестируем WebSocket соединение...');
+            showStatus('websocket-status', 'Подключаемся...', 'warning');
+
+            const wsUrl = window.location.hostname === 'localhost' 
+                ? 'ws://localhost:3000' 
+                : 'wss://aqqqqqq-2.onrender.com';
+
+            log(`Подключаемся к: ${wsUrl}`);
+
+            const ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                showStatus('websocket-status', '✅ WebSocket подключен', 'success');
+                log('WebSocket соединение установлено');
+                ws.close();
+            };
+
+            ws.onerror = (error) => {
+                showStatus('websocket-status', '❌ Ошибка WebSocket', 'error');
+                log(`WebSocket ошибка: ${error}`);
+            };
+
+            ws.onclose = (event) => {
+                log(`WebSocket закрыт: код ${event.code}, причина: ${event.reason}`);
+            };
+
+            // Таймаут на случай если соединение зависнет
+            setTimeout(() => {
+                if (ws.readyState === WebSocket.CONNECTING) {
+                    ws.close();
+                    showStatus('websocket-status', '❌ Таймаут подключения', 'error');
+                    log('WebSocket таймаут подключения');
+                }
+            }, 10000);
+        }
+
+        // 5. Тест PeerConnection
+        function testPeerConnection() {
+            try {
+                log('Создаем RTCPeerConnection...');
+                
+                const config = {
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' }
+                    ]
+                };
+
+                const pc = new RTCPeerConnection(config);
+                
+                pc.oniceconnectionstatechange = () => {
+                    log(`ICE состояние: ${pc.iceConnectionState}`);
+                };
+
+                pc.onconnectionstatechange = () => {
+                    log(`Состояние соединения: ${pc.connectionState}`);
+                };
+
+                showStatus('peer-status', '✅ PeerConnection создан успешно', 'success');
+                log('RTCPeerConnection создан успешно');
+
+                // Создаем тестовый offer
+                pc.createOffer()
+                    .then(offer => {
+                        log('Тестовый offer создан успешно');
+                        return pc.setLocalDescription(offer);
+                    })
+                    .then(() => {
+                        log('Local description установлен');
+                        showStatus('peer-status', '✅ PeerConnection полностью функционален', 'success');
+                    })
+                    .catch(error => {
+                        log(`Ошибка создания offer: ${error.message}`);
+                        showStatus('peer-status', `❌ Ошибка offer: ${error.message}`, 'error');
+                    });
+
+                // Закрываем через 5 секунд
+                setTimeout(() => {
+                    pc.close();
+                    log('PeerConnection закрыт');
+                }, 5000);
+
+            } catch (error) {
+                showStatus('peer-status', `❌ Ошибка: ${error.message}`, 'error');
+                log(`Ошибка создания PeerConnection: ${error.message}`);
+            }
+        }
+
+        // 6. Диагностика основного приложения
+        function debugMainApp() {
+            log('Проверяем основное приложение...');
+            
+            try {
+                // Проверяем наличие основных функций
+                const checks = {
+                    'window.debugVideoCall': typeof window.debugVideoCall === 'function',
+                    'window.chatApp': typeof window.chatApp === 'object',
+                    'startGroupCall': typeof window.chatApp?.startGroupCall === 'function',
+                    'endCall': typeof window.chatApp?.endCall === 'function'
+                };
+
+                let html = '<ul>';
+                for (const [check, passed] of Object.entries(checks)) {
+                    const status = passed ? '✅' : '❌';
+                    const color = passed ? 'success' : 'error';
+                    html += `<li><span class="status ${color}">${status} ${check}</span></li>`;
+                    log(`Проверка ${check}: ${passed ? 'ПРОЙДЕНА' : 'ПРОВАЛЕНА'}`);
+                }
+                html += '</ul>';
+
+                document.getElementById('main-app-status').innerHTML = html;
+
+                // Если доступна функция отладки, вызываем её
+                if (window.debugVideoCall) {
+                    log('Вызываем debugVideoCall из основного приложения...');
+                    window.debugVideoCall();
+                }
+
+            } catch (error) {
+                showStatus('main-app-status', `❌ Ошибка: ${error.message}`, 'error');
+                log(`Ошибка проверки основного приложения: ${error.message}`);
+            }
+        }
+
+        // Инициализация при загрузке
+        window.addEventListener('DOMContentLoaded', () => {
+            log('Страница диагностики загружена');
+            checkWebRTCSupport();
+        });
+    </script>
+</body>
+</html>
