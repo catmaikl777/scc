@@ -6113,4 +6113,130 @@
     monitorConnections,
     forceTurnConnection
   };
+
+  // ========== ФОНОВЫЙ РЕЖИМ И УВЕДОМЛЕНИЯ ==========
+  
+  // Обработчик видимости страницы
+  function handleVisibilityChange() {
+    console.log("👁️ Visibility changed:", document.hidden ? "hidden" : "visible");
+    
+    if (!document.hidden) {
+      // Страница стала активной
+      console.log("✅ Page is now visible");
+      
+      // Очищаем счётчик непрочитанных
+      window.unreadCount = 0;
+      updateUnreadBadge();
+    } else {
+      // Страница стала скрытой
+      console.log("💤 Page is now hidden");
+    }
+  }
+
+  // Инициализация уведомлений
+  function initializeNotifications() {
+    console.log("🔔 Initializing notifications...");
+    
+    // Регистрируем Service Worker
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js')
+        .then(reg => {
+          console.log("✅ Service Worker registered:", reg.scope);
+        })
+        .catch(err => {
+          console.error("❌ Service Worker registration failed:", err);
+        });
+    }
+
+    // Запрашиваем разрешение на уведомления
+    if ('Notification' in window && Notification.permission === 'default') {
+      // Автоматически не запрашиваем, ждём действий пользователя
+      console.log("📝 Notification permission: default (waiting for user action)");
+    }
+
+    // Инициализируем backgroundNotifications
+    window.backgroundNotifications = {
+      showNotification: function(title, options = {}) {
+        if (Notification.permission === 'granted') {
+          const notification = new Notification(title, {
+            icon: './icon.png',
+            badge: './icon.png',
+            ...options
+          });
+          
+          notification.onclick = function() {
+            window.focus();
+            notification.close();
+          };
+          
+          return notification;
+        }
+        return null;
+      },
+      
+      sendIfHidden: function(title, body, data = {}) {
+        if (document.hidden && Notification.permission === 'granted') {
+          const notification = new Notification(title, {
+            body: body,
+            icon: './icon.png',
+            badge: './icon.png',
+            tag: data.type || 'default',
+            requireInteraction: data.requireInteraction || false,
+            data: data
+          });
+          
+          notification.onclick = function() {
+            window.focus();
+            notification.close();
+          };
+          
+          // Увеличиваем счётчик непрочитанных
+          window.unreadCount = (window.unreadCount || 0) + 1;
+          updateUnreadBadge();
+          
+          return notification;
+        }
+        return null;
+      }
+    };
+
+    // Обработчик visibility change
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    console.log("✅ Notifications initialized");
+  }
+
+  // Обновление бейджа непрочитанных
+  function updateUnreadBadge() {
+    const count = window.unreadCount || 0;
+    // Можно добавить визуальный индикатор
+    document.title = count > 0 ? `(${count}) Чат` : 'Чат';
+  }
+
+  // Функция запроса разрешения на уведомления
+  function requestNotificationPermission() {
+    if ('Notification' in window) {
+      Notification.requestPermission().then(permission => {
+        if (permission === 'granted') {
+          showSystemMessage("✅ Уведомления включены");
+        } else {
+          showSystemMessage("❌ Уведомления отключены");
+        }
+      });
+    }
+  }
+
+  // Вызываем инициализацию уведомлений
+  initializeNotifications();
+
+  // Регистрируем Service Worker для push-уведомлений
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js')
+        .then(reg => console.log('✅ SW registered'))
+        .catch(err => console.error('❌ SW registration failed:', err));
+    });
+  }
+
+  // ========== КОНЕЦ ФОНОВОГО РЕЖИМА ==========
 })();

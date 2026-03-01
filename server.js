@@ -3386,9 +3386,11 @@ wss.on("connection", async (ws, req) => {
       }
     } catch (error) {
       console.error('❌ Error handling message:', error);
+      console.error('❌ Message that caused error:', JSON.stringify(message));
+      console.error('❌ Stack trace:', error.stack);
       ws.send(JSON.stringify({
         type: "error",
-        message: "Ошибка при обработке сообщения"
+        message: "Ошибка при обработке сообщения: " + error.message
       }));
     }
   });
