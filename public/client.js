@@ -1038,34 +1038,69 @@
           updateUsersList(message.users);
         }
         break;
-      case "room_created":
-        handleRoomCreated(message);
-        break;
-      case "room_joined":
-        handleRoomJoined(message);
-        break;
-      case "room_users":
-        handleRoomUsers(message);
-        break;
-      case "user_joined":
-        handleUserJoined(message);
-        break;
-      case "group_call_started":
-        handleGroupCallStarted(message);
-        break;
-      case "group_call_ended":
-        handleGroupCallEnded(message);
-        break;
-      case "call_ended":
-        handleCallEnded(message);
-        break;
-      case "user_left_call":
-        handleUserLeftCall(message);
+      case "error":
+        handleErrorMessage(message);
         break;
 
       default:
         console.log("❌ Unknown message type:", message);
     }
+  }
+    
+  // Функция загрузки файлов
+  function handleFileUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    console.log("📤 Uploading file:", file.name, file.size);
+
+    // Проверка размера файла (макс 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      showSystemMessage("❌ Файл слишком большой (макс 10MB)");
+      fileInput.value = "";
+      return;
+    }
+
+    showSystemMessage("🔄 Загрузка файла...");
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const base64 = e.target.result.split(',')[1];
+      
+      sendMessage({
+        type: "file",
+        filename: file.name,
+        filetype: file.type,
+        size: file.size,
+        data: base64
+      });
+
+      showSystemMessage(`✅ Файл "${file.name}" отправлен`);
+      
+      // Воспроизводим звук
+      playSound('file');
+      
+      // Показываем уведомление
+      if (window.backgroundNotifications) {
+        window.backgroundNotifications.sendIfHidden(
+          "📎 Файл отправлен",
+          file.name,
+          { type: 'file', filename: file.name }
+        );
+      }
+    };
+
+    reader.onerror = function() {
+      showSystemMessage("❌ Ошибка чтения файла");
+    };
+
+    reader.readAsDataURL(file);
+    fileInput.value = ""; // Сброс input для повторной загрузки
+  }
+    
+  function handleErrorMessage(message) {
+    console.error("❌ Server error:", message);
+    showSystemMessage(message.message || "❌ Произошла ошибка на сервере");
   }
     
   function handleInitMessage(message) {
@@ -3972,7 +4007,7 @@
       hideVideoCallUI();
       hideIncomingCallModal();
       updateCallButtons();
-      
+
       if (switchCameraBtn) {
         switchCameraBtn.style.display = "none";
       }

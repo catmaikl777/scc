@@ -3185,7 +3185,8 @@ wss.on("connection", async (ws, req) => {
 
         case "create_room":
           // Проверяем, это видеозвонок (без пароля) или приватная комната
-          if (message.roomId && !message.name && !message.password) {
+          // Для видеозвонка: message.roomId есть, message.name и message.password отсутствуют или пустые
+          if (message.roomId && (!message.name || message.name === "") && (!message.password || message.password === "")) {
             // Видеозвонок - создаём комнату без пароля
             const roomId = message.roomId;
             console.log(`📞 Creating video call room: ${roomId}`);
