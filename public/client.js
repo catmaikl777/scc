@@ -1273,6 +1273,206 @@
     }
   }
 
+  // Индивидуальные звонки
+  function handleCallInvite(message) {
+    console.log("📞 Incoming call:", message);
+    
+    incomingCall = {
+      callId: message.callId,
+      roomId: message.roomId,
+      fromSessionId: message.fromSessionId,
+      fromUserId: message.fromUserId,
+      fromUsername: message.fromUsername,
+      isVideo: message.isVideo
+    };
+    
+    showSystemMessage(`📞 ${message.fromUsername} звонит вам...`);
+    
+    // Показываем UI для принятия/отклонения звонка
+    if (incomingCallModal) {
+      incomingCallModal.classList.remove("hidden");
+      const callerNameEl = document.getElementById("callerName");
+      if (callerNameEl) {
+        callerNameEl.textContent = message.fromUsername;
+      }
+    }
+  }
+
+  function handleCallStarted(message) {
+    console.log("📞 Call started:", message);
+    currentRoomId = message.roomId;
+    isInCall = true;
+    
+    if (videoCallContainer) {
+      videoCallContainer.classList.remove("hidden");
+    }
+    
+    showSystemMessage("✅ Звонок начат");
+  }
+
+  function handleCallRejected(message) {
+    console.log("❌ Call rejected:", message);
+    showSystemMessage(`❌ ${message.fromUsername} отклонил звонок`);
+    
+    // Очищаем состояние
+    if (localStream) {
+      localStream.getTracks().forEach(track => track.stop());
+      localStream = null;
+    }
+    
+    currentRoomId = null;
+    isInCall = false;
+    
+    if (videoCallContainer) {
+      videoCallContainer.classList.add("hidden");
+    }
+  }
+
+  function handleActiveCalls(message) {
+    console.log("📞 Active calls:", message);
+    // Показываем информацию об активных звонках
+    if (message.calls && message.calls.length > 0) {
+      showSystemMessage(`👥 Активно звонков: ${message.calls.length}`);
+    }
+  }
+
+  // WebRTC функции для звонков
+  function handleWebRTCOffer(message) {
+    console.log("🔄 WebRTC offer received:", message);
+    
+    // Создаём или обновляем пир-соединение
+    const peerConnection = getOrCreatePeerConnection(message.fromSessionId);
+    
+    peerConnection.setRemoteDescription(new RTCSessionDescription(message.offer))
+      .then(() => {
+        return peerConnection.createAnswer();
+      })
+      .then(answer => {
+        return peerConnection.setLocalDescription(answer);
+      })
+      .then(() => {
+        sendMessage({
+          type: "webrtc_answer",
+          targetSessionId: message.fromSessionId,
+          roomId: message.roomId,
+          answer: peerConnection.localDescription
+        });
+      })
+      .catch(err => {
+        console.error("❌ Error handling WebRTC offer:", err);
+      });
+  }
+
+  function handleWebRTCAnswer(message) {
+    console.log("🔄 WebRTC answer received:", message);
+    
+    const peerConnection = peerConnections[message.fromSessionId];
+    if (peerConnection) {
+      peerConnection.setRemoteDescription(new RTCSessionDescription(message.answer))
+        .catch(err => {
+          console.error("❌ Error setting remote description:", err);
+        });
+    }
+  }
+
+  function handleICECandidate(message) {
+    console.log("🔄 ICE candidate received:", message);
+    
+    const peerConnection = peerConnections[message.fromSessionId];
+    if (peerConnection && message.candidate) {
+      peerConnection.addIceCandidate(new RTCIceCandidate(message.candidate))
+        .catch(err => {
+          console.error("❌ Error adding ICE candidate:", err);
+        });
+    }
+  }
+
+  // Создание пир-соединения
+  function getOrCreatePeerConnection(remoteSessionId) {
+    if (peerConnections[remoteSessionId]) {
+      return peerConnections[remoteSessionId];
+    }
+
+    const config = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    };
+
+    const pc = new RTCPeerConnection(config);
+    peerConnections[remoteSessionId] = pc;
+
+    // Добавляем локальный стрим
+    if (localStream) {
+      localStream.getTracks().forEach(track => {
+        pc.addTrack(track, localStream);
+      });
+    }
+
+    // Обработка ICE кандидатов
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        sendMessage({
+          type: "webrtc_ice_candidate",
+          targetSessionId: remoteSessionId,
+          roomId: currentRoomId,
+          candidate: event.candidate
+        });
+      }
+    };
+
+    // Обработка удалённого стрима
+    pc.ontrack = (event) => {
+      console.log("📹 Remote track received:", event.streams[0]);
+      handleRemoteStream(event.streams[0], remoteSessionId);
+    };
+
+    pc.onconnectionstatechange = () => {
+      console.log("📡 Connection state:", pc.connectionState);
+      if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+        handlePeerDisconnected(remoteSessionId);
+      }
+    };
+
+    return pc;
+  }
+
+  function handleRemoteStream(stream, sessionId) {
+    console.log("📹 Handling remote stream:", sessionId);
+    // Создаём видео элемент для удалённого пользователя
+    const videoContainer = document.getElementById("videoGrid");
+    if (!videoContainer) return;
+
+    let remoteVideo = document.getElementById(`remoteVideo_${sessionId}`);
+    if (!remoteVideo) {
+      remoteVideo = document.createElement("video");
+      remoteVideo.id = `remoteVideo_${sessionId}`;
+      remoteVideo.autoplay = true;
+      remoteVideo.playsInline = true;
+      remoteVideo.className = "remote-video";
+      videoContainer.appendChild(remoteVideo);
+    }
+
+    remoteVideo.srcObject = stream;
+    updateVideoGridLayout();
+  }
+
+  function handlePeerDisconnected(sessionId) {
+    console.log("👋 Peer disconnected:", sessionId);
+    const remoteVideo = document.getElementById(`remoteVideo_${sessionId}`);
+    if (remoteVideo) {
+      remoteVideo.remove();
+    }
+    
+    if (peerConnections[sessionId]) {
+      peerConnections[sessionId].close();
+      delete peerConnections[sessionId];
+    }
+    
+    updateVideoGridLayout();
+  }
+
   // Отображение сообщений
   function showMessage(data, isHistory = false) {
     const el = document.createElement("div");
@@ -6111,7 +6311,110 @@
     debugVideoCall: window.debugVideoCall,
     recoverAllConnections: window.recoverAllConnections,
     monitorConnections,
-    forceTurnConnection
+    forceTurnConnection,
+    // Индивидуальный звонок
+    startIndividualCall: async function(targetSessionId, isVideo = true) {
+      console.log("📞 Starting individual call to:", targetSessionId, "video:", isVideo);
+      
+      if (isInCall) {
+        showSystemMessage("⚠️ Вы уже находитесь в звонке");
+        return;
+      }
+
+      try {
+        showSystemMessage("🎥 Запрашиваем доступ к камере и микрофону...");
+        
+        if (!localStream) {
+          await initializeLocalStream();
+        }
+
+        const callId = "call_" + Date.now();
+        const roomId = "call_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+        
+        console.log("📞 Creating call:", callId, "room:", roomId);
+
+        // Создаём комнату на сервере
+        sendMessage({
+          type: "create_room",
+          roomId: roomId
+        });
+
+        // Отправляем приглашение конкретному пользователю
+        sendMessage({
+          type: "call_invite",
+          callId: callId,
+          roomId: roomId,
+          targetSessionId: targetSessionId,
+          isVideo: isVideo
+        });
+
+        currentRoomId = roomId;
+        isInCall = true;
+        isCallInitiator = true;
+        
+        if (videoCallContainer) {
+          videoCallContainer.classList.remove("hidden");
+        }
+
+        showSystemMessage("📞 Звонок инициирован...");
+        
+      } catch (error) {
+        console.error("❌ Error starting individual call:", error);
+        showSystemMessage("❌ Ошибка при начале звонка: " + error.message);
+      }
+    },
+    // Принять звонок
+    acceptCall: function() {
+      console.log("✅ Accepting call...");
+      
+      if (!incomingCall) {
+        showSystemMessage("⚠️ Нет входящего звонка");
+        return;
+      }
+
+      sendMessage({
+        type: "call_accept",
+        callId: incomingCall.callId,
+        targetSessionId: incomingCall.fromSessionId,
+        roomId: incomingCall.roomId
+      });
+
+      currentRoomId = incomingCall.roomId;
+      isInCall = true;
+      isCallInitiator = false;
+
+      if (incomingCallModal) {
+        incomingCallModal.classList.add("hidden");
+      }
+
+      if (videoCallContainer) {
+        videoCallContainer.classList.remove("hidden");
+      }
+
+      showSystemMessage("✅ Вы присоединились к звонку");
+      incomingCall = null;
+    },
+    // Отклонить звонок
+    declineCall: function() {
+      console.log("❌ Declining call...");
+      
+      if (!incomingCall) {
+        return;
+      }
+
+      sendMessage({
+        type: "call_reject",
+        callId: incomingCall.callId,
+        targetSessionId: incomingCall.fromSessionId
+      });
+
+      if (incomingCallModal) {
+        incomingCallModal.classList.add("hidden");
+      }
+
+      showSystemMessage("❌ Звонок отклонён");
+      incomingCall = null;
+    }
   };
 
   // ========== ФОНОВЫЙ РЕЖИМ И УВЕДОМЛЕНИЯ ==========

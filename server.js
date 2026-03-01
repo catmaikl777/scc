@@ -3383,6 +3383,154 @@ wss.on("connection", async (ws, req) => {
             }));
           }
           break;
+
+        // Индивидуальные звонки
+        case "call_invite":
+          console.log(`📞 Call invite from ${sessionId} to ${message.targetSessionId}`);
+          const targetClient = clients.get(message.targetSessionId);
+          if (targetClient) {
+            // Пересылаем приглашение целевому пользователю
+            targetClient.ws.send(JSON.stringify({
+              type: "call_invite",
+              callId: message.callId,
+              roomId: message.roomId,
+              fromSessionId: sessionId,
+              fromUserId: userId,
+              fromUsername: currentUser.username,
+              isVideo: message.isVideo
+            }));
+            console.log(`✅ Call invite sent to ${message.targetSessionId}`);
+          } else {
+            ws.send(JSON.stringify({
+              type: "system",
+              text: "❌ Пользователь не найден или не в сети"
+            }));
+          }
+          break;
+
+        case "call_accept":
+          console.log(`📞 Call accepted by ${sessionId}`);
+          const callerClient = clients.get(message.targetSessionId);
+          if (callerClient) {
+            callerClient.ws.send(JSON.stringify({
+              type: "call_accepted",
+              callId: message.callId,
+              roomId: message.roomId,
+              fromSessionId: sessionId,
+              fromUserId: userId,
+              fromUsername: currentUser.username
+            }));
+          }
+          break;
+
+        case "call_reject":
+          console.log(`📞 Call rejected by ${sessionId}`);
+          const rejectClient = clients.get(message.targetSessionId);
+          if (rejectClient) {
+            rejectClient.ws.send(JSON.stringify({
+              type: "call_rejected",
+              callId: message.callId,
+              fromSessionId: sessionId,
+              fromUsername: currentUser.username
+            }));
+          }
+          break;
+
+        case "call_end":
+          console.log(`📞 Call ended by ${sessionId}`);
+          // Уведомляем всех участников звонка
+          if (message.roomId && global.videoCallRooms && global.videoCallRooms.has(message.roomId)) {
+            const callRoom = global.videoCallRooms.get(message.roomId);
+            callRoom.participants.forEach(pSessionId => {
+              const pClient = clients.get(pSessionId);
+              if (pClient && pSessionId !== sessionId) {
+                pClient.ws.send(JSON.stringify({
+                  type: "call_ended",
+                  roomId: message.roomId,
+                  endedBy: currentUser.username
+                }));
+              }
+            });
+          }
+          break;
+
+        // WebRTC сигналинг для групповых звонков
+        case "webrtc_offer":
+          console.log(`🔄 WebRTC offer from ${sessionId} to ${message.targetSessionId}`);
+          const offerTarget = clients.get(message.targetSessionId);
+          if (offerTarget) {
+            offerTarget.ws.send(JSON.stringify({
+              type: "webrtc_offer",
+              roomId: message.roomId,
+              fromSessionId: sessionId,
+              fromUserId: userId,
+              fromUsername: currentUser.username,
+              offer: message.offer
+            }));
+          }
+          break;
+
+        case "webrtc_answer":
+          console.log(`🔄 WebRTC answer from ${sessionId} to ${message.targetSessionId}`);
+          const answerTarget = clients.get(message.targetSessionId);
+          if (answerTarget) {
+            answerTarget.ws.send(JSON.stringify({
+              type: "webrtc_answer",
+              roomId: message.roomId,
+              fromSessionId: sessionId,
+              fromUserId: userId,
+              answer: message.answer
+            }));
+          }
+          break;
+
+        case "webrtc_ice_candidate":
+          console.log(`🔄 WebRTC ICE from ${sessionId} to ${message.targetSessionId}`);
+          const iceTarget = clients.get(message.targetSessionId);
+          if (iceTarget) {
+            iceTarget.ws.send(JSON.stringify({
+              type: "webrtc_ice_candidate",
+              roomId: message.roomId,
+              fromSessionId: sessionId,
+              candidate: message.candidate
+            }));
+          }
+          break;
+
+        // WebRTC сигналинг для индивидуальных звонков
+        case "offer":
+          const offerToClient = clients.get(message.targetSessionId);
+          if (offerToClient) {
+            offerToClient.ws.send(JSON.stringify({
+              type: "offer",
+              offer: message.offer,
+              fromSessionId: sessionId,
+              fromUsername: currentUser.username
+            }));
+          }
+          break;
+
+        case "answer":
+          const answerToClient = clients.get(message.targetSessionId);
+          if (answerToClient) {
+            answerToClient.ws.send(JSON.stringify({
+              type: "answer",
+              answer: message.answer,
+              fromSessionId: sessionId
+            }));
+          }
+          break;
+
+        case "ice_candidate":
+          const iceToClient = clients.get(message.targetSessionId);
+          if (iceToClient) {
+            iceToClient.ws.send(JSON.stringify({
+              type: "ice_candidate",
+              candidate: message.candidate,
+              fromSessionId: sessionId
+            }));
+          }
+          break;
       }
     } catch (error) {
       console.error('❌ Error handling message:', error);
