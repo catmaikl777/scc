@@ -14,10 +14,19 @@
     return outputArray;
   }
 
-  async function getVapidPublicKey() {
-    const res = await fetch(`${apiBase}/api/push/vapidPublicKey`);
-    const { publicKey } = await res.json();
-    return publicKey;
+  async function getVapidPublicKey(retries = 3) {
+    for (let i = 0; i < retries; i++) {
+      try {
+        const res = await fetch(`${apiBase}/api/push/vapidPublicKey`);
+        if (!res.ok) throw new Error('API error');
+        const data = await res.json();
+        return data.publicKey;
+      } catch (e) {
+        console.log(`🔄 Retry ${i + 1}/${retries}:`, e.message);
+        if (i < retries - 1) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+      }
+    }
+    throw new Error('Failed to get VAPID key');
   }
 
   function updatePushButton(status) {
@@ -98,6 +107,12 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(subscription)
       });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error('Subscribe response:', errText);
+        throw new Error('Subscribe failed');
+      }
 
       if (res.ok) {
         console.log('✅ Push subscribed');

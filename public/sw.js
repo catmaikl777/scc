@@ -83,13 +83,28 @@ self.addEventListener('push', (event) => {
 
 // Обработка запросов
 self.addEventListener('fetch', (event) => {
+  // Пропускаем запросы к API (может быть проблема с CORS когда сервер спит)
+  if (event.request.url.includes('/api/')) {
+    event.respondWith(
+      fetch(event.request).catch(() => {
+        return new Response(JSON.stringify({ error: 'Server sleeping' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      })
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request)
       .then((response) => {
         // Возвращаем кэшированную версию или загружаем из сети
-        return response || fetch(event.request);
-      }
-    )
+        return response || fetch(event.request).catch(() => {
+          // Если не удалось загрузить, возвращаем базовую страницу из кэша
+          return caches.match('/');
+        });
+      })
   );
 });
 
