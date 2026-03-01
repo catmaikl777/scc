@@ -1181,6 +1181,98 @@
     }
   }
 
+  // Обработчики сообщений для видеозвонков
+  function handleRoomCreated(message) {
+    console.log("📥 Room created:", message);
+    currentRoomId = message.roomId;
+    isInCall = true;
+    isCallInitiator = true;
+    
+    if (videoCallContainer) {
+      videoCallContainer.classList.remove("hidden");
+    }
+    
+    showSystemMessage(message.message || "✅ Комната звонка создана");
+    
+    // Инициализируем локальный стрим если ещё нет
+    if (!localStream) {
+      initializeLocalStream().catch(err => {
+        console.error("❌ Failed to init stream:", err);
+        showSystemMessage("⚠️ Камера недоступна");
+      });
+    }
+  }
+
+  function handleRoomUsers(message) {
+    console.log("👥 Room users:", message);
+    if (message.users && Array.isArray(message.users)) {
+      // Обновляем отображение участников
+      updateCallParticipantsUI(message.users);
+    }
+  }
+
+  function updateCallParticipantsUI(participants) {
+    // Функция для обновления UI участников звонка
+    console.log("🔄 Updating call participants UI:", participants);
+    // Здесь можно добавить визуализацию участников
+  }
+
+  function handleUserJoined(message) {
+    console.log("👤 User joined:", message);
+    showSystemMessage(`👤 ${message.username || 'Пользователь'} присоединился к звонку`);
+    
+    // Воспроизводим звук
+    playSound('join');
+    
+    // Уведомление
+    if (window.backgroundNotifications) {
+      window.backgroundNotifications.sendIfHidden(
+        "Новый участник",
+        `${message.username} присоединился к звонку`,
+        { type: 'call' }
+      );
+    }
+  }
+
+  function handleUserLeft(message) {
+    console.log("👋 User left:", message);
+    showSystemMessage(`👋 Пользователь покинул звонок`);
+  }
+
+  function handleGroupCallStarted(message) {
+    console.log("📞 Group call started:", message);
+    showSystemMessage(`👥 ${message.fromUserName || 'Пользователь'} начал групповой звонок`);
+    
+    // Сохраняем информацию о звонке
+    currentRoomId = message.roomId;
+    
+    // Воспроизводим звук
+    playSound('call');
+    
+    // Показываем кнопку присоединения
+    if (videoCallContainer) {
+      videoCallContainer.classList.remove("hidden");
+    }
+  }
+
+  function handleGroupCallEnded(message) {
+    console.log("📴 Group call ended:", message);
+    showSystemMessage("📴 Групповой звонок завершён");
+    
+    // Очищаем состояние
+    if (localStream) {
+      localStream.getTracks().forEach(track => track.stop());
+      localStream = null;
+    }
+    
+    currentRoomId = null;
+    isInCall = false;
+    
+    if (videoCallContainer) {
+      videoCallContainer.classList.add("hidden");
+    }
+  }
+
   // Отображение сообщений
   function showMessage(data, isHistory = false) {
     const el = document.createElement("div");
