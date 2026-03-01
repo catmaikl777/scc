@@ -3184,7 +3184,41 @@ wss.on("connection", async (ws, req) => {
           break;
 
         case "create_room":
-          if (message.name && message.password) {
+          // Проверяем, это видеозвонок (без пароля) или приватная комната
+          if (message.roomId && !message.name && !message.password) {
+            // Видеозвонок - создаём комнату без пароля
+            const roomId = message.roomId;
+            console.log(`📞 Creating video call room: ${roomId}`);
+            
+            // Создаём комнату для видеозвонка в памяти
+            if (!videoCallRooms) {
+              global.videoCallRooms = new Map();
+            }
+            videoCallRooms.set(roomId, {
+              id: roomId,
+              createdBy: sessionId,
+              createdAt: Date.now(),
+              participants: [sessionId]
+            });
+            
+            // Отправляем подтверждение создателю
+            ws.send(JSON.stringify({
+              type: "room_created",
+              roomId: roomId,
+              message: "✅ Комната звонка создана"
+            }));
+            
+            // Уведомляем всех о начале группового звонка
+            broadcast({
+              type: "group_call_started",
+              roomId: roomId,
+              fromUserId: userId,
+              fromUserName: currentUser.username
+            }, sessionId);
+            
+            console.log(`✅ Video call room created: ${roomId}`);
+          } else if (message.name && message.password) {
+            // Приватная комната с паролем
             const client = await pool.connect();
             try {
               const bcrypt = require('bcrypt');
@@ -3218,7 +3252,68 @@ wss.on("connection", async (ws, req) => {
           break;
 
         case "join_room":
-          if (message.roomId && message.password) {
+          // Проверяем, это видеозвонок (без пароля) или приватная комната
+          if (message.roomId && !message.password) {
+            // Видеозвонок - присоединяемся без пароля
+            const roomId = message.roomId;
+            console.log(`📞 Joining video call room: ${roomId}, session: ${sessionId}`);
+            
+            // Проверяем, существует ли комната
+            let videoCallRoom = null;
+            if (global.videoCallRooms && global.videoCallRooms.has(roomId)) {
+              videoCallRoom = global.videoCallRooms.get(roomId);
+            }
+            
+            if (videoCallRoom) {
+              // Добавляем участника
+              if (!videoCallRoom.participants.includes(sessionId)) {
+                videoCallRoom.participants.push(sessionId);
+              }
+              
+              // Отправляем подтверждение
+              ws.send(JSON.stringify({
+                type: "room_joined",
+                roomId: roomId,
+                participants: videoCallRoom.participants.length
+              }));
+              
+              // Уведомляем других участников
+              broadcast({
+                type: "user_joined",
+                roomId: roomId,
+                userId: userId,
+                sessionId: sessionId,
+                username: currentUser.username
+              }, sessionId);
+              
+              // Отправляем список участников комнаты
+              const roomUsersList = [];
+              videoCallRoom.participants.forEach(pSessionId => {
+                const pClient = clients.get(pSessionId);
+                if (pClient) {
+                  roomUsersList.push({
+                    sessionId: pSessionId,
+                    userId: pClient.userId,
+                    username: pClient.username
+                  });
+                }
+              });
+              
+              ws.send(JSON.stringify({
+                type: "room_users",
+                roomId: roomId,
+                users: roomUsersList
+              }));
+              
+              console.log(`✅ Joined video call room: ${roomId}`);
+            } else {
+              ws.send(JSON.stringify({
+                type: "system",
+                text: "❌ Комната звонка не найдена"
+              }));
+            }
+          } else if (message.roomId && message.password) {
+            // Приватная комната с паролем
             const client = await pool.connect();
             try {
               const bcrypt = require('bcrypt');
@@ -3250,6 +3345,41 @@ wss.on("connection", async (ws, req) => {
             } finally {
               client.release();
             }
+          }
+          break;
+
+        case "leave_room":
+          if (message.roomId) {
+            const roomId = message.roomId;
+            console.log(`📞 User leaving room: ${roomId}, session: ${sessionId}`);
+            
+            // Удаляем участника из комнаты
+            if (global.videoCallRooms && global.videoCallRooms.has(roomId)) {
+              const videoCallRoom = global.videoCallRooms.get(roomId);
+              const index = videoCallRoom.participants.indexOf(sessionId);
+              if (index > -1) {
+                videoCallRoom.participants.splice(index, 1);
+              }
+              
+              // Уведомляем остальных участников
+              broadcast({
+                type: "user_left_call",
+                roomId: roomId,
+                sessionId: sessionId,
+                userId: userId
+              }, sessionId);
+              
+              // Если комната пуста, удаляем её
+              if (videoCallRoom.participants.length === 0) {
+                global.videoCallRooms.delete(roomId);
+                console.log(`🗑️ Video call room deleted: ${roomId}`);
+              }
+            }
+            
+            ws.send(JSON.stringify({
+              type: "call_ended",
+              roomId: roomId
+            }));
           }
           break;
       }

@@ -1032,12 +1032,42 @@
       case "active_calls":
         handleActiveCalls(message);
         break;
+      case "online_users":
+        if (message.users && Array.isArray(message.users)) {
+          console.log("📋 Online users updated:", message.users.length);
+          updateUsersList(message.users);
+        }
+        break;
+      case "room_created":
+        handleRoomCreated(message);
+        break;
+      case "room_joined":
+        handleRoomJoined(message);
+        break;
+      case "room_users":
+        handleRoomUsers(message);
+        break;
+      case "user_joined":
+        handleUserJoined(message);
+        break;
+      case "group_call_started":
+        handleGroupCallStarted(message);
+        break;
+      case "group_call_ended":
+        handleGroupCallEnded(message);
+        break;
+      case "call_ended":
+        handleCallEnded(message);
+        break;
+      case "user_left_call":
+        handleUserLeftCall(message);
+        break;
 
       default:
         console.log("❌ Unknown message type:", message);
     }
   }
-
+    
   function handleInitMessage(message) {
     mySessionId = message.sessionId;
     myId = message.id;
@@ -1473,7 +1503,7 @@
           audioChunks.push(event.data);
         }
       };
-
+      
       mediaRecorder.onstop = handleRecordingStop;
 
       mediaRecorder.onstart = () => {
@@ -1484,13 +1514,13 @@
         startVisualization(stream);
         showSystemMessage("🎤 Запись начата...");
       };
-
+      
       mediaRecorder.onerror = (event) => {
         console.error("❌ MediaRecorder error:", event.error);
         showSystemMessage("❌ Ошибка записи");
         cancelVoiceRecording();
       };
-
+      
       // Начинаем запись
       try {
         mediaRecorder.start(100); // 100ms chunks
@@ -2879,6 +2909,30 @@
     endCall();
   }
 
+  function handleUserLeftCall(message) {
+    console.log("👋 User left call (from server):", message);
+    showSystemMessage(`👋 Пользователь покинул звонок`);
+    
+    setTimeout(() => {
+      updateRoomUsers();
+    }, 500);
+  }
+
+  // UI функции для видеозвонка (дополнительные)
+  function showVideoCallUIBasic() {
+    if (!videoCallContainer) {
+      console.error("❌ Video call container not found!");
+      return;
+    }
+    videoCallContainer.classList.remove("hidden");
+  }
+
+  function hideVideoCallUIBasic() {
+    if (videoCallContainer) {
+      videoCallContainer.classList.add("hidden");
+    }
+  }
+
   // WebRTC Peer Connection с улучшенными настройками
   async function createPeerConnection(targetSessionId) {
     console.log(`🔗 Creating peer connection for: ${targetSessionId}`);
@@ -2934,7 +2988,7 @@
           }
         });
       }
-
+      
       // Обработчик получения удаленных потоков
       pc.ontrack = (event) => {
         console.log(`📹 Received ${event.track.kind} track from ${targetSessionId}`);
@@ -5864,6 +5918,69 @@
     startGroupCall,
     endCall,
     updateVideoGridLayout,
+    // Функции для внешнего вызова (video-test.html)
+    startGroupCallExternal: async function() {
+      console.log("📞 Starting group call (external)...");
+      
+      if (isInCall) {
+        showSystemMessage("⚠️ Вы уже находитесь в звонке");
+        return;
+      }
+
+      try {
+        showSystemMessage("🎥 Запрашиваем доступ к камере и микрофону...");
+        
+        if (!localStream) {
+          await initializeLocalStream();
+        }
+
+        const roomId = "call_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+        console.log("📞 Creating room:", roomId);
+
+        sendMessage({
+          type: "create_room",
+          roomId: roomId
+        });
+
+      } catch (error) {
+        console.error("❌ Error starting group call:", error);
+        showSystemMessage("❌ Ошибка при начале звонка: " + error.message);
+      }
+    },
+    endCallExternal: function() {
+      console.log("📴 Ending call (external)...");
+      
+      if (!isInCall && !currentRoomId) {
+        console.log("No active call to end");
+        return;
+      }
+
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+      }
+
+      const localVideo = document.getElementById("localVideo");
+      if (localVideo) {
+        localVideo.srcObject = null;
+      }
+
+      if (currentRoomId) {
+        sendMessage({
+          type: "leave_room",
+          roomId: currentRoomId
+        });
+      }
+
+      currentRoomId = null;
+      isInCall = false;
+      isCallInitiator = false;
+
+      hideVideoCallUI();
+
+      showSystemMessage("📴 Звонок завершён");
+      console.log("✅ Call ended");
+    },
     debugVideoCall: window.debugVideoCall,
     recoverAllConnections: window.recoverAllConnections,
     monitorConnections,
