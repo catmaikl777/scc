@@ -3192,10 +3192,10 @@ wss.on("connection", async (ws, req) => {
             console.log(`📞 Creating video call room: ${roomId}`);
             
             // Создаём комнату для видеозвонка в памяти
-            if (!videoCallRooms) {
+            if (!global.videoCallRooms) {
               global.videoCallRooms = new Map();
             }
-            videoCallRooms.set(roomId, {
+            global.videoCallRooms.set(roomId, {
               id: roomId,
               createdBy: sessionId,
               createdAt: Date.now(),
